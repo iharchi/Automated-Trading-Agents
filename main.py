@@ -2,13 +2,14 @@
 """Entry point for the Automated Trading Agents system.
 
 Usage:
-    python main.py                         # Run full pipeline on default symbols
+    python main.py                         # Full pipeline (TA + Sentiment + Risk)
     python main.py AAPL TSLA MSFT          # Analyse specific symbols
     python main.py --agent ta              # Technical Analysis only
     python main.py --agent sentiment       # Sentiment Analysis only
-    python main.py --agent risk            # Risk Management only (needs --price/--atr)
+    python main.py --agent risk            # TA + Risk (no sentiment)
     python main.py --test                  # Run connection test only
     python main.py --auto-trade            # Enable paper-trade execution
+    python main.py --ta-weight 0.7 --sentiment-weight 0.3   # Custom weights
 """
 
 import argparse
@@ -19,9 +20,10 @@ from config.settings import Settings
 from agents.technical_analysis_agent import TechnicalAnalysisAgent
 from agents.sentiment_analysis_agent import SentimentAnalysisAgent
 from agents.risk_management_agent import RiskManagementAgent
+from agents.portfolio_manager_agent import PortfolioManagerAgent
 
-# Signal-generating agents (run independently per symbol)
-SIGNAL_AGENTS = {
+# Individual agents for standalone mode
+STANDALONE_AGENTS = {
     "ta": {
         "class": TechnicalAnalysisAgent,
         "label": "Technical Analysis",
@@ -30,9 +32,11 @@ SIGNAL_AGENTS = {
         "class": SentimentAnalysisAgent,
         "label": "Sentiment Analysis",
     },
+    "risk": {
+        "class": None,  # risk requires TA data, handled specially
+        "label": "Risk Management",
+    },
 }
-
-ALL_AGENT_KEYS = list(SIGNAL_AGENTS.keys()) + ["risk"]
 
 
 def setup_logging():
@@ -49,61 +53,39 @@ def run_connection_test():
     return test_connection()
 
 
-def run_pipeline(
-    symbol: str,
-    signal_agents: dict,
-    risk_agent: RiskManagementAgent | None,
-    auto_trade: bool,
-    **kwargs,
-) -> None:
-    """Run signal agents, then pass results through risk management."""
-    ta_analysis = None
+def run_standalone(agent, symbol: str, **kwargs) -> None:
+    """Run a single standalone agent and print its output."""
+    analysis = agent.analyze(symbol, **kwargs)
+    print(agent.format_analysis(analysis))
 
-    # 1. Run each signal agent
-    for key, agent in signal_agents.items():
-        try:
-            analysis = agent.analyze(symbol, **kwargs)
-            print(agent.format_analysis(analysis))
 
-            # Keep TA results for the risk agent
-            if key == "ta":
-                ta_analysis = analysis
-        except Exception as e:
-            logging.getLogger("main").error(
-                "Error running %s on %s: %s",
-                SIGNAL_AGENTS[key]["label"], symbol, e,
-            )
+def run_standalone_risk(symbol: str, auto_trade: bool, **kwargs) -> None:
+    """Run TA + Risk without the full portfolio manager."""
+    ta_agent = TechnicalAnalysisAgent(auto_trade=False)
+    risk_agent = RiskManagementAgent(auto_trade=auto_trade)
 
-    # 2. Run risk assessment if we have TA data
-    if risk_agent and ta_analysis:
-        signal = ta_analysis.get("signal", "HOLD")
-        if signal != "HOLD":
-            proposed_side = "buy" if signal == "BUY" else "sell"
-            try:
-                risk_result = risk_agent.analyze(
-                    symbol,
-                    proposed_side=proposed_side,
-                    price=ta_analysis.get("current_price", 0),
-                    atr=ta_analysis.get("atr", 0),
-                )
-                print(RiskManagementAgent.format_analysis(risk_result))
+    ta_result = ta_agent.analyze(symbol, **kwargs)
+    print(TechnicalAnalysisAgent.format_analysis(ta_result))
 
-                if auto_trade and risk_result.get("approved"):
-                    exec_result = risk_agent.execute(symbol, risk_result)
-                    order = exec_result.get("order")
-                    if order and order not in (None, "skipped_no_position"):
-                        print(f"  Order placed: {order}")
-            except Exception as e:
-                logging.getLogger("main").error(
-                    "Error running Risk Management on %s: %s", symbol, e,
-                )
-        else:
-            print(f"  [{symbol}] Signal is HOLD — skipping risk assessment.\n")
-    elif risk_agent and not ta_analysis:
-        logging.getLogger("main").warning(
-            "Risk agent enabled but no TA data for %s — skipping risk check.",
-            symbol,
-        )
+    signal = ta_result.get("signal", "HOLD")
+    if signal == "HOLD":
+        print(f"  [{symbol}] Signal is HOLD — skipping risk assessment.\n")
+        return
+
+    proposed_side = "buy" if signal == "BUY" else "sell"
+    risk_result = risk_agent.analyze(
+        symbol,
+        proposed_side=proposed_side,
+        price=ta_result.get("current_price", 0),
+        atr=ta_result.get("atr", 0),
+    )
+    print(RiskManagementAgent.format_analysis(risk_result))
+
+    if auto_trade and risk_result.get("approved"):
+        exec_result = risk_agent.execute(symbol, risk_result)
+        order = exec_result.get("order")
+        if order and order not in (None, "skipped_no_position"):
+            print(f"  Order placed: {order}")
 
 
 def main():
@@ -112,9 +94,9 @@ def main():
     parser.add_argument("--test", action="store_true", help="Run connection test")
     parser.add_argument(
         "--agent",
-        choices=ALL_AGENT_KEYS,
+        choices=list(STANDALONE_AGENTS.keys()),
         default=None,
-        help="Run a specific agent (default: full pipeline)",
+        help="Run a single agent instead of the full pipeline",
     )
     parser.add_argument(
         "--auto-trade",
@@ -127,6 +109,18 @@ def main():
         choices=["1Min", "5Min", "15Min", "1Hour", "1Day"],
         help="Bar timeframe for Technical Analysis (default: 1Day)",
     )
+    parser.add_argument(
+        "--ta-weight",
+        type=float,
+        default=0.65,
+        help="Weight for Technical Analysis signals (default: 0.65)",
+    )
+    parser.add_argument(
+        "--sentiment-weight",
+        type=float,
+        default=0.35,
+        help="Weight for Sentiment Analysis signals (default: 0.35)",
+    )
     args = parser.parse_args()
 
     setup_logging()
@@ -137,43 +131,61 @@ def main():
 
     symbols = args.symbols or Settings.DEFAULT_SYMBOLS
 
-    # Determine which agents to run
-    if args.agent and args.agent != "risk":
-        selected_signals = {args.agent: SIGNAL_AGENTS[args.agent]}
-        risk_agent = None
-    elif args.agent == "risk":
-        # Risk alone still needs TA to provide price/ATR
-        selected_signals = {"ta": SIGNAL_AGENTS["ta"]}
-        risk_agent = RiskManagementAgent(auto_trade=args.auto_trade)
-    else:
-        # Full pipeline: all signal agents + risk
-        selected_signals = dict(SIGNAL_AGENTS)
-        risk_agent = RiskManagementAgent(auto_trade=args.auto_trade)
+    # ── Standalone agent mode ────────────────────────────────
+    if args.agent:
+        label = STANDALONE_AGENTS[args.agent]["label"]
+        print(f"\nTrading mode : {Settings.TRADING_MODE}")
+        print(f"Agent        : {label} (standalone)")
+        print(f"Symbols      : {', '.join(symbols)}")
+        print(f"Timeframe    : {args.timeframe}")
+        print(f"Auto-trade   : {'ON' if args.auto_trade else 'OFF'}\n")
 
-    agent_labels = [v["label"] for v in selected_signals.values()]
-    if risk_agent:
-        agent_labels.append("Risk Management")
+        for symbol in symbols:
+            try:
+                if args.agent == "risk":
+                    run_standalone_risk(
+                        symbol,
+                        auto_trade=args.auto_trade,
+                        timeframe=args.timeframe,
+                    )
+                else:
+                    agent_cls = STANDALONE_AGENTS[args.agent]["class"]
+                    agent = agent_cls(auto_trade=args.auto_trade)
+                    run_standalone(agent, symbol, timeframe=args.timeframe)
+            except Exception as e:
+                logging.getLogger("main").error(
+                    "Error running %s on %s: %s", label, symbol, e,
+                )
+        return
 
+    # ── Full pipeline via Portfolio Manager ──────────────────
     print(f"\nTrading mode : {Settings.TRADING_MODE}")
-    print(f"Agents       : {', '.join(agent_labels)}")
+    print(f"Pipeline     : Portfolio Manager (TA + Sentiment + Risk)")
+    print(f"Weights      : TA={args.ta_weight:.0%}  Sentiment={args.sentiment_weight:.0%}")
     print(f"Symbols      : {', '.join(symbols)}")
     print(f"Timeframe    : {args.timeframe}")
     print(f"Auto-trade   : {'ON' if args.auto_trade else 'OFF'}\n")
 
-    # Instantiate signal agents
-    agents = {
-        key: info["class"](auto_trade=False)  # signal agents don't trade directly
-        for key, info in selected_signals.items()
-    }
+    pm = PortfolioManagerAgent(
+        ta_weight=args.ta_weight,
+        sentiment_weight=args.sentiment_weight,
+        auto_trade=args.auto_trade,
+    )
 
     for symbol in symbols:
-        run_pipeline(
-            symbol,
-            signal_agents=agents,
-            risk_agent=risk_agent,
-            auto_trade=args.auto_trade,
-            timeframe=args.timeframe,
-        )
+        try:
+            decision = pm.analyze(symbol, timeframe=args.timeframe)
+            print(PortfolioManagerAgent.format_analysis(decision))
+
+            if args.auto_trade:
+                result = pm.execute(symbol, decision)
+                order = result.get("order")
+                if order and order not in (None, "skipped_no_position"):
+                    print(f"  Order placed: {order}")
+        except Exception as e:
+            logging.getLogger("main").error(
+                "Error in portfolio pipeline for %s: %s", symbol, e,
+            )
 
 
 if __name__ == "__main__":
