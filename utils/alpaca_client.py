@@ -144,6 +144,43 @@ class AlpacaClient:
             for p in positions
         ]
 
+    # ── News ─────────────────────────────────────────────────
+
+    def get_news(
+        self,
+        symbol: str,
+        limit: int = 20,
+        start: str | None = None,
+        end: str | None = None,
+        include_content: bool = False,
+    ) -> list[dict]:
+        """Fetch recent news articles for a symbol.
+
+        Returns a list of dicts with keys:
+            id, headline, summary, source, url, created_at, symbols
+        """
+        kwargs: dict = {"symbol": symbol, "limit": limit, "include_content": include_content}
+        if start:
+            kwargs["start"] = start
+        if end:
+            kwargs["end"] = end
+
+        articles = self.api.get_news(**kwargs)
+        return [
+            {
+                "id": a.id,
+                "headline": a.headline,
+                "summary": getattr(a, "summary", "") or "",
+                "source": a.source,
+                "url": getattr(a, "url", ""),
+                "created_at": str(a.created_at),
+                "symbols": list(a.symbols) if a.symbols else [],
+            }
+            for a in articles
+        ]
+
+    # ── Market Clock ─────────────────────────────────────────
+
     def is_market_open(self) -> bool:
         """Check whether the market is currently open."""
         clock = self.api.get_clock()
