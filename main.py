@@ -26,6 +26,7 @@ from agents.risk_management_agent import RiskManagementAgent
 from agents.portfolio_manager_agent import PortfolioManagerAgent
 from agents.execution_agent import ExecutionAgent
 from utils.trade_journal import TradeJournal
+from utils.notifier import Notifier
 
 # Individual agents for standalone mode
 STANDALONE_AGENTS = {
@@ -49,6 +50,32 @@ def setup_logging():
         level=getattr(logging, Settings.LOG_LEVEL, logging.INFO),
         format="%(asctime)s  %(name)-25s  %(levelname)-7s  %(message)s",
         datefmt="%H:%M:%S",
+    )
+
+
+def create_notifier() -> Notifier:
+    """Build a Notifier instance from Settings."""
+    return Notifier(
+        # Email
+        email_enabled=Settings.NOTIFY_EMAIL_ENABLED,
+        smtp_host=Settings.NOTIFY_SMTP_HOST,
+        smtp_port=Settings.NOTIFY_SMTP_PORT,
+        smtp_user=Settings.NOTIFY_SMTP_USER,
+        smtp_password=Settings.NOTIFY_SMTP_PASSWORD,
+        email_from=Settings.NOTIFY_EMAIL_FROM,
+        email_to=Settings.NOTIFY_EMAIL_TO,
+        # Slack
+        slack_enabled=Settings.NOTIFY_SLACK_ENABLED,
+        slack_webhook_url=Settings.NOTIFY_SLACK_WEBHOOK,
+        # Discord
+        discord_enabled=Settings.NOTIFY_DISCORD_ENABLED,
+        discord_webhook_url=Settings.NOTIFY_DISCORD_WEBHOOK,
+        # Generic webhook
+        webhook_enabled=Settings.NOTIFY_WEBHOOK_ENABLED,
+        webhook_url=Settings.NOTIFY_WEBHOOK_URL,
+        # Filtering
+        enabled_events=Settings.NOTIFY_ENABLED_EVENTS,
+        min_signal_score=Settings.NOTIFY_MIN_SIGNAL_SCORE,
     )
 
 
@@ -226,6 +253,7 @@ def main():
 
     # ── Full pipeline via Portfolio Manager + Execution Agent ─
     journal = TradeJournal()
+    notifier = create_notifier()
     execute_orders = args.auto_trade or args.dry_run
 
     print(f"\nTrading mode : {Settings.TRADING_MODE}")
@@ -264,6 +292,17 @@ def main():
                 )
             journal.log_decision(decision)
 
+            # ── Notify on actionable signals ─────────────
+            signal = decision.get("signal", "HOLD")
+            if signal in ("BUY", "SELL"):
+                notifier.notify_signal(
+                    symbol=symbol,
+                    signal=signal,
+                    score=decision.get("combined_score", 0),
+                    price=decision.get("current_price", 0),
+                    confidence=decision.get("confidence", 0),
+                )
+
             # ── Execution Agent ──────────────────────────
             if execute_orders:
                 exec_analysis = exec_agent.analyze(symbol, decision=decision)
@@ -288,6 +327,32 @@ def main():
                         order_result=order_info,
                         reason=exec_result.get("error", ""),
                     )
+
+                    # ── Notify on order events ───────────
+                    if status == "filled":
+                        notifier.notify_order_filled(
+                            symbol=symbol,
+                            side=side,
+                            qty=qty,
+                            avg_price=exec_result.get("filled_avg_price", 0),
+                            order_id=exec_result.get("order_id", ""),
+                        )
+                    elif status == "failed":
+                        notifier.notify_order_failed(
+                            symbol=symbol,
+                            side=side,
+                            qty=qty,
+                            error=exec_result.get("error", "Unknown error"),
+                        )
+                    elif status not in ("dry_run",):
+                        # Order was placed but not yet filled
+                        notifier.notify_order_placed(
+                            symbol=symbol,
+                            side=side,
+                            qty=qty,
+                            order_type=exec_result.get("order_type", "market"),
+                            order_id=exec_result.get("order_id", ""),
+                        )
         except Exception as e:
             logging.getLogger("main").error(
                 "Error in portfolio pipeline for %s: %s", symbol, e,

@@ -88,6 +88,52 @@ class Settings:
     BT_INITIAL_CAPITAL: float = float(_y("backtest", "initial_capital", 100_000))
     BT_DAYS: int = int(_y("backtest", "days", 365))
 
+    # ── Notifications ────────────────────────────────────────
+    NOTIFY_ENABLED_EVENTS: list[str] = _y(
+        "notifications", "enabled_events",
+        ["signal", "order_placed", "order_filled", "order_failed"],
+    )
+    NOTIFY_MIN_SIGNAL_SCORE: float = float(
+        _y("notifications", "min_signal_score", 0.25)
+    )
+
+    # Email
+    NOTIFY_EMAIL_ENABLED: bool = (
+        _yaml_cfg.get("notifications", {}).get("email", {}).get("enabled", False)
+    )
+    NOTIFY_SMTP_HOST: str = _yaml_cfg.get("notifications", {}).get("email", {}).get(
+        "smtp_host", "smtp.gmail.com"
+    )
+    NOTIFY_SMTP_PORT: int = int(
+        _yaml_cfg.get("notifications", {}).get("email", {}).get("smtp_port", 587)
+    )
+    NOTIFY_SMTP_USER: str = os.getenv("SMTP_USER", "")
+    NOTIFY_SMTP_PASSWORD: str = os.getenv("SMTP_PASSWORD", "")
+    NOTIFY_EMAIL_FROM: str = _yaml_cfg.get("notifications", {}).get("email", {}).get(
+        "from_address", ""
+    )
+    NOTIFY_EMAIL_TO: list[str] = _yaml_cfg.get("notifications", {}).get("email", {}).get(
+        "to_addresses", []
+    )
+
+    # Slack
+    NOTIFY_SLACK_ENABLED: bool = (
+        _yaml_cfg.get("notifications", {}).get("slack", {}).get("enabled", False)
+    )
+    NOTIFY_SLACK_WEBHOOK: str = os.getenv("SLACK_WEBHOOK_URL", "")
+
+    # Discord
+    NOTIFY_DISCORD_ENABLED: bool = (
+        _yaml_cfg.get("notifications", {}).get("discord", {}).get("enabled", False)
+    )
+    NOTIFY_DISCORD_WEBHOOK: str = os.getenv("DISCORD_WEBHOOK_URL", "")
+
+    # Generic webhook
+    NOTIFY_WEBHOOK_ENABLED: bool = (
+        _yaml_cfg.get("notifications", {}).get("webhook", {}).get("enabled", False)
+    )
+    NOTIFY_WEBHOOK_URL: str = os.getenv("NOTIFY_WEBHOOK_URL", "")
+
     @classmethod
     def validate(cls) -> bool:
         """Check that required keys are set."""

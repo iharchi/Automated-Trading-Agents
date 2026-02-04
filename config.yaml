@@ -85,3 +85,33 @@ backtest:
 # Logging
 logging:
   level: INFO                # DEBUG, INFO, WARNING, ERROR
+
+# Notifications
+notifications:
+  # Filter settings
+  enabled_events:            # Which events trigger notifications
+    - signal
+    - order_placed
+    - order_filled
+    - order_failed
+  min_signal_score: 0.25     # Only notify for signals >= this threshold
+
+  # Email (SMTP) — credentials via env vars: SMTP_USER, SMTP_PASSWORD
+  email:
+    enabled: false
+    smtp_host: smtp.gmail.com
+    smtp_port: 587
+    from_address: ""
+    to_addresses: []         # List of recipient emails
+
+  # Slack — webhook URL via env var: SLACK_WEBHOOK_URL
+  slack:
+    enabled: false
+
+  # Discord — webhook URL via env var: DISCORD_WEBHOOK_URL
+  discord:
+    enabled: false
+
+  # Generic webhook — URL via env var: NOTIFY_WEBHOOK_URL
+  webhook:
+    enabled: false
