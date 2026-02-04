@@ -62,6 +62,12 @@ class Settings:
     TA_BUY_THRESHOLD: int = int(_y("technical_analysis", "buy_threshold", 2))
     TA_SELL_THRESHOLD: int = int(_y("technical_analysis", "sell_threshold", -2))
 
+    # ── Multi-Timeframe Analysis ─────────────────────────────
+    MTF_ENABLED: bool = _y("multi_timeframe", "enabled", False)
+    MTF_TIMEFRAMES: list[str] = _y("multi_timeframe", "timeframes", ["1Day", "1Hour"])
+    MTF_AGREEMENT_MODE: str = _y("multi_timeframe", "agreement_mode", "unanimous")
+    MTF_MIN_AGREEMENT: float = float(_y("multi_timeframe", "min_agreement", 0.5))
+
     # ── Sentiment Analysis ───────────────────────────────────
     SENT_NEWS_LIMIT: int = int(_y("sentiment_analysis", "news_limit", 20))
     SENT_LOOKBACK_DAYS: int = int(_y("sentiment_analysis", "lookback_days", 7))

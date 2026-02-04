@@ -7,9 +7,12 @@ Usage:
     python main.py --agent ta              # Technical Analysis only
     python main.py --agent sentiment       # Sentiment Analysis only
     python main.py --agent risk            # TA + Risk (no sentiment)
+    python main.py --agent mtf             # Multi-Timeframe Analysis only
     python main.py --test                  # Run connection test only
     python main.py --auto-trade            # Enable paper-trade execution
     python main.py --dry-run               # Full pipeline with execution checks (no orders)
+    python main.py --multi-timeframe       # Use multi-timeframe analysis pipeline
+    python main.py --multi-timeframe --mtf-mode majority   # MTF with majority agreement
     python main.py --ta-weight 0.7 --sentiment-weight 0.3   # Custom weights
     python main.py --backtest AAPL         # Backtest TA strategy on AAPL
     python main.py --backtest AAPL --days 730 --capital 50000
@@ -25,6 +28,7 @@ from agents.sentiment_analysis_agent import SentimentAnalysisAgent
 from agents.risk_management_agent import RiskManagementAgent
 from agents.portfolio_manager_agent import PortfolioManagerAgent
 from agents.execution_agent import ExecutionAgent
+from agents.multi_timeframe_agent import MultiTimeframeAgent
 from utils.trade_journal import TradeJournal
 from utils.notifier import Notifier
 
@@ -41,6 +45,10 @@ STANDALONE_AGENTS = {
     "risk": {
         "class": None,  # risk requires TA data, handled specially
         "label": "Risk Management",
+    },
+    "mtf": {
+        "class": MultiTimeframeAgent,
+        "label": "Multi-Timeframe Analysis",
     },
 }
 
@@ -147,6 +155,17 @@ def main():
         help="Bar timeframe for Technical Analysis (default: 1Day)",
     )
     parser.add_argument(
+        "--multi-timeframe",
+        action="store_true",
+        help="Enable multi-timeframe analysis (combines signals from multiple timeframes)",
+    )
+    parser.add_argument(
+        "--mtf-mode",
+        default="unanimous",
+        choices=["unanimous", "majority", "weighted"],
+        help="Multi-timeframe agreement mode (default: unanimous)",
+    )
+    parser.add_argument(
         "--ta-weight",
         type=float,
         default=0.65,
@@ -241,6 +260,16 @@ def main():
                         auto_trade=args.auto_trade,
                         timeframe=args.timeframe,
                     )
+                elif args.agent == "mtf":
+                    # Multi-timeframe agent needs special config
+                    agent = MultiTimeframeAgent(
+                        timeframes=Settings.MTF_TIMEFRAMES,
+                        agreement_mode=args.mtf_mode,
+                        min_agreement=Settings.MTF_MIN_AGREEMENT,
+                        auto_trade=args.auto_trade,
+                    )
+                    analysis = agent.analyze(symbol)
+                    print(MultiTimeframeAgent.format_analysis(analysis))
                 else:
                     agent_cls = STANDALONE_AGENTS[args.agent]["class"]
                     agent = agent_cls(auto_trade=args.auto_trade)
@@ -248,6 +277,129 @@ def main():
             except Exception as e:
                 logging.getLogger("main").error(
                     "Error running %s on %s: %s", label, symbol, e,
+                )
+        return
+
+    # ── Multi-Timeframe pipeline mode ─────────────────────────
+    use_mtf = args.multi_timeframe or Settings.MTF_ENABLED
+
+    if use_mtf:
+        journal = TradeJournal()
+        notifier = create_notifier()
+        execute_orders = args.auto_trade or args.dry_run
+
+        print(f"\nTrading mode : {Settings.TRADING_MODE}")
+        print(f"Pipeline     : Multi-Timeframe TA → Risk → Execution")
+        print(f"Timeframes   : {', '.join(Settings.MTF_TIMEFRAMES)}")
+        print(f"Agreement    : {args.mtf_mode}")
+        print(f"Symbols      : {', '.join(symbols)}")
+        print(f"Auto-trade   : {'ON' if args.auto_trade else 'OFF'}")
+        print(f"Dry-run      : {'ON' if args.dry_run else 'OFF'}")
+        print(f"Journal      : {journal.journal_dir}\n")
+
+        mtf_agent = MultiTimeframeAgent(
+            timeframes=Settings.MTF_TIMEFRAMES,
+            agreement_mode=args.mtf_mode,
+            min_agreement=Settings.MTF_MIN_AGREEMENT,
+            auto_trade=False,
+        )
+        risk_agent = RiskManagementAgent(auto_trade=False)
+        exec_agent = ExecutionAgent(client=mtf_agent.client, dry_run=args.dry_run)
+
+        for symbol in symbols:
+            try:
+                # Run multi-timeframe analysis
+                mtf_result = mtf_agent.analyze(symbol)
+                print(MultiTimeframeAgent.format_analysis(mtf_result))
+
+                signal = mtf_result.get("final_signal", "HOLD")
+                price = mtf_result.get("current_price", 0)
+                atr = mtf_result.get("atr", 0)
+
+                # Log to journal
+                journal.log_signal(
+                    symbol=symbol,
+                    agent="MultiTimeframe",
+                    signal=signal,
+                    score=mtf_result.get("weighted_score", 0),
+                    price=price,
+                )
+
+                # Notify on actionable signals
+                if signal in ("BUY", "SELL"):
+                    notifier.notify_signal(
+                        symbol=symbol,
+                        signal=signal,
+                        score=mtf_result.get("weighted_score", 0),
+                        price=price,
+                        confidence=mtf_result.get("confidence", 0),
+                        agreement=mtf_result.get("agreement_ratio", 0),
+                    )
+
+                # Run through risk management if actionable
+                if signal != "HOLD":
+                    proposed_side = "buy" if signal == "BUY" else "sell"
+                    risk_result = risk_agent.analyze(
+                        symbol,
+                        proposed_side=proposed_side,
+                        price=price,
+                        atr=atr,
+                    )
+                    print(RiskManagementAgent.format_analysis(risk_result))
+
+                    # Build decision dict for execution agent
+                    decision = {
+                        "symbol": symbol,
+                        "signal": signal,
+                        "risk_approved": risk_result.get("approved", False),
+                        "position_size": risk_result.get("position_size", 0),
+                        "current_price": price,
+                        "stop_loss": risk_result.get("stop_loss", 0),
+                        "take_profit": risk_result.get("take_profit", 0),
+                        "atr": atr,
+                        "combined_score": mtf_result.get("weighted_score", 0),
+                        "confidence": mtf_result.get("confidence", 0),
+                    }
+                    journal.log_decision(decision)
+
+                    # Execute if enabled
+                    if execute_orders and risk_result.get("approved"):
+                        exec_analysis = exec_agent.analyze(symbol, decision=decision)
+                        exec_result = exec_agent.execute(symbol, exec_analysis)
+                        print(ExecutionAgent.format_analysis(exec_result))
+
+                        status = exec_result.get("status", "skipped")
+                        if status not in ("skipped",):
+                            order_info = {
+                                "id": exec_result.get("order_id", ""),
+                                "status": status,
+                                "type": exec_result.get("order_type", "market"),
+                            }
+                            journal.log_order(
+                                symbol=symbol,
+                                side=proposed_side,
+                                qty=exec_result.get("qty", 0),
+                                order_result=order_info,
+                            )
+
+                            if status == "filled":
+                                notifier.notify_order_filled(
+                                    symbol=symbol,
+                                    side=proposed_side,
+                                    qty=exec_result.get("qty", 0),
+                                    avg_price=exec_result.get("filled_avg_price", 0),
+                                    order_id=exec_result.get("order_id", ""),
+                                )
+                            elif status == "failed":
+                                notifier.notify_order_failed(
+                                    symbol=symbol,
+                                    side=proposed_side,
+                                    qty=exec_result.get("qty", 0),
+                                    error=exec_result.get("error", "Unknown error"),
+                                )
+            except Exception as e:
+                logging.getLogger("main").error(
+                    "Error in MTF pipeline for %s: %s", symbol, e,
                 )
         return
 

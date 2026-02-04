@@ -42,6 +42,15 @@ technical_analysis:
   buy_threshold: 2
   sell_threshold: -2
 
+# Multi-Timeframe Analysis
+multi_timeframe:
+  enabled: false              # Set to true to use multi-timeframe mode
+  timeframes:                 # List of timeframes to analyze (order = priority)
+    - 1Day
+    - 1Hour
+  agreement_mode: unanimous   # unanimous, majority, or weighted
+  min_agreement: 0.5          # For majority mode: minimum ratio to trigger signal
+
 # Sentiment Analysis Agent
 sentiment_analysis:
   news_limit: 20
