@@ -140,15 +140,15 @@ class TestBacktesterScoring(unittest.TestCase):
     """Test the bar scoring method."""
 
     def test_score_range(self):
-        """Score should be between -4 and +4 (4 indicators, each ±1)."""
+        """Score should be between -6 and +6 (6 indicators, each ±1)."""
         df = _make_trending_bars(100, trend="up")
         bt = Backtester()
         df = bt._compute_indicators(df)
         df = df.dropna()
         for _, row in df.iterrows():
             score = bt._score_bar(row)
-            self.assertGreaterEqual(score, -4)
-            self.assertLessEqual(score, 4)
+            self.assertGreaterEqual(score, -6)
+            self.assertLessEqual(score, 6)
 
 
 class TestFormatResult(unittest.TestCase):

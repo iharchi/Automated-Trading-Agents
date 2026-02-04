@@ -12,6 +12,9 @@ from agents.technical_analysis_agent import (
     TechnicalAnalysisAgent,
     RSI_OVERSOLD,
     RSI_OVERBOUGHT,
+    STOCH_OVERSOLD,
+    STOCH_OVERBOUGHT,
+    ADX_TREND_THRESHOLD,
     BUY_THRESHOLD,
     SELL_THRESHOLD,
 )
@@ -117,6 +120,80 @@ class TestIndicatorHelpers(unittest.TestCase):
         result = TechnicalAnalysisAgent._compute_ema_crossover(close, short=9, long=21)
         self.assertEqual(result.signal, -1)
 
+    def test_stochastic_oversold(self):
+        """A sharp drop should push Stochastic into oversold territory."""
+        prices = [100.0] * 20 + [100 - i * 3 for i in range(20)]
+        high = [p + 1 for p in prices]
+        low = [p - 1 for p in prices]
+        result = TechnicalAnalysisAgent._compute_stochastic(
+            pd.Series(high), pd.Series(low), _make_price_series(prices),
+            period=14, smooth=3,
+        )
+        self.assertLessEqual(result.value, STOCH_OVERSOLD)
+        self.assertEqual(result.signal, 1)
+
+    def test_stochastic_overbought(self):
+        """A sharp rise should push Stochastic into overbought territory."""
+        prices = [50.0] * 20 + [50 + i * 3 for i in range(20)]
+        high = [p + 1 for p in prices]
+        low = [p - 1 for p in prices]
+        result = TechnicalAnalysisAgent._compute_stochastic(
+            pd.Series(high), pd.Series(low), _make_price_series(prices),
+            period=14, smooth=3,
+        )
+        self.assertGreaterEqual(result.value, STOCH_OVERBOUGHT)
+        self.assertEqual(result.signal, -1)
+
+    def test_stochastic_neutral(self):
+        """Sideways price should yield neutral Stochastic."""
+        np.random.seed(99)
+        prices = list(100 + np.random.normal(0, 0.5, 50))
+        high = [p + 0.5 for p in prices]
+        low = [p - 0.5 for p in prices]
+        result = TechnicalAnalysisAgent._compute_stochastic(
+            pd.Series(high), pd.Series(low), _make_price_series(prices),
+            period=14, smooth=3,
+        )
+        self.assertEqual(result.signal, 0)
+
+    def test_adx_bullish_trend(self):
+        """Strong uptrend should produce ADX bullish signal."""
+        bars = _make_bars(80, trend="up")
+        result = TechnicalAnalysisAgent._compute_adx(
+            bars["high"], bars["low"], bars["close"], period=14,
+        )
+        # In a strong uptrend, if ADX is above threshold, signal should be +1
+        if result.value >= ADX_TREND_THRESHOLD:
+            self.assertEqual(result.signal, 1)
+        else:
+            self.assertEqual(result.signal, 0)
+
+    def test_adx_bearish_trend(self):
+        """Strong downtrend should produce ADX bearish signal."""
+        bars = _make_bars(80, trend="down")
+        result = TechnicalAnalysisAgent._compute_adx(
+            bars["high"], bars["low"], bars["close"], period=14,
+        )
+        if result.value >= ADX_TREND_THRESHOLD:
+            self.assertEqual(result.signal, -1)
+        else:
+            self.assertEqual(result.signal, 0)
+
+    def test_adx_flat_neutral(self):
+        """Flat market should produce neutral ADX (low trend strength)."""
+        np.random.seed(42)
+        n = 80
+        base = 100 + np.random.normal(0, 0.3, n)
+        df = pd.DataFrame({
+            "high": base + 0.2,
+            "low": base - 0.2,
+            "close": base,
+        })
+        result = TechnicalAnalysisAgent._compute_adx(
+            df["high"], df["low"], df["close"], period=14,
+        )
+        self.assertEqual(result.signal, 0)
+
     def test_atr_positive(self):
         """ATR should always be a positive number."""
         bars = _make_bars(50, trend="up")
@@ -192,6 +269,24 @@ class TestIndicatorResultFields(unittest.TestCase):
         )
         self.assertEqual(result.name, "EMA_Cross")
         self.assertIn(result.signal, (-1, 0, 1))
+
+    def test_stochastic_result_fields(self):
+        bars = _make_bars(50, trend="up")
+        result = TechnicalAnalysisAgent._compute_stochastic(
+            bars["high"], bars["low"], bars["close"], period=14, smooth=3,
+        )
+        self.assertEqual(result.name, "Stochastic")
+        self.assertIn(result.signal, (-1, 0, 1))
+        self.assertIsInstance(result.detail, str)
+
+    def test_adx_result_fields(self):
+        bars = _make_bars(50, trend="up")
+        result = TechnicalAnalysisAgent._compute_adx(
+            bars["high"], bars["low"], bars["close"], period=14,
+        )
+        self.assertEqual(result.name, "ADX")
+        self.assertIn(result.signal, (-1, 0, 1))
+        self.assertIsInstance(result.detail, str)
 
 
 if __name__ == "__main__":

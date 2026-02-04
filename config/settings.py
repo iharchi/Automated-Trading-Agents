@@ -1,24 +1,92 @@
 import os
+from pathlib import Path
+
+import yaml
 from dotenv import load_dotenv
 
 load_dotenv()
 
+# ── Load YAML config (if it exists) ─────────────────────────────
+
+_CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
+_yaml_cfg: dict = {}
+
+if _CONFIG_PATH.exists():
+    with open(_CONFIG_PATH) as f:
+        _yaml_cfg = yaml.safe_load(f) or {}
+
+
+def _y(section: str, key: str, default=None):
+    """Read a value from the YAML config: _y('risk_management', 'max_position_pct')."""
+    return _yaml_cfg.get(section, {}).get(key, default)
+
 
 class Settings:
-    """Central configuration loaded from environment variables."""
+    """Central configuration loaded from config.yaml + environment variables.
 
+    Precedence: env vars > config.yaml > hardcoded defaults.
+    """
+
+    # ── Alpaca API (always from env for security) ────────────
     ALPACA_API_KEY: str = os.getenv("ALPACA_API_KEY", "")
     ALPACA_SECRET_KEY: str = os.getenv("ALPACA_SECRET_KEY", "")
     ALPACA_BASE_URL: str = os.getenv(
-        "ALPACA_BASE_URL", "https://paper-api.alpaca.markets"
+        "ALPACA_BASE_URL",
+        _y("alpaca", "base_url", "https://paper-api.alpaca.markets"),
     )
 
+    # ── General trading ──────────────────────────────────────
     DEFAULT_SYMBOLS: list[str] = os.getenv(
-        "DEFAULT_SYMBOLS", "AAPL,MSFT,GOOGL,AMZN,TSLA"
+        "DEFAULT_SYMBOLS",
+        ",".join(_y("trading", "default_symbols", ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA"])),
     ).split(",")
 
-    TRADING_MODE: str = os.getenv("TRADING_MODE", "paper")
-    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+    TRADING_MODE: str = os.getenv("TRADING_MODE", _y("trading", "mode", "paper"))
+    TIMEFRAME: str = _y("trading", "timeframe", "1Day")
+    LOG_LEVEL: str = os.getenv("LOG_LEVEL", _y("logging", "level", "INFO"))
+
+    # ── Technical Analysis ───────────────────────────────────
+    TA_RSI_PERIOD: int = int(_y("technical_analysis", "rsi_period", 14))
+    TA_RSI_OVERSOLD: int = int(_y("technical_analysis", "rsi_oversold", 30))
+    TA_RSI_OVERBOUGHT: int = int(_y("technical_analysis", "rsi_overbought", 70))
+    TA_EMA_SHORT: int = int(_y("technical_analysis", "ema_short", 9))
+    TA_EMA_LONG: int = int(_y("technical_analysis", "ema_long", 21))
+    TA_BB_PERIOD: int = int(_y("technical_analysis", "bb_period", 20))
+    TA_BB_STD: int = int(_y("technical_analysis", "bb_std", 2))
+    TA_STOCHASTIC_PERIOD: int = int(_y("technical_analysis", "stochastic_period", 14))
+    TA_STOCHASTIC_SMOOTH: int = int(_y("technical_analysis", "stochastic_smooth", 3))
+    TA_STOCHASTIC_OVERSOLD: int = int(_y("technical_analysis", "stochastic_oversold", 20))
+    TA_STOCHASTIC_OVERBOUGHT: int = int(_y("technical_analysis", "stochastic_overbought", 80))
+    TA_ADX_PERIOD: int = int(_y("technical_analysis", "adx_period", 14))
+    TA_ADX_TREND_THRESHOLD: int = int(_y("technical_analysis", "adx_trend_threshold", 25))
+    TA_BUY_THRESHOLD: int = int(_y("technical_analysis", "buy_threshold", 2))
+    TA_SELL_THRESHOLD: int = int(_y("technical_analysis", "sell_threshold", -2))
+
+    # ── Sentiment Analysis ───────────────────────────────────
+    SENT_NEWS_LIMIT: int = int(_y("sentiment_analysis", "news_limit", 20))
+    SENT_LOOKBACK_DAYS: int = int(_y("sentiment_analysis", "lookback_days", 7))
+    SENT_BULLISH_THRESHOLD: float = float(_y("sentiment_analysis", "bullish_threshold", 0.15))
+    SENT_BEARISH_THRESHOLD: float = float(_y("sentiment_analysis", "bearish_threshold", -0.15))
+
+    # ── Risk Management ──────────────────────────────────────
+    RISK_MAX_POSITION_PCT: float = float(_y("risk_management", "max_position_pct", 0.10))
+    RISK_MAX_EXPOSURE: float = float(_y("risk_management", "max_portfolio_exposure", 0.90))
+    RISK_PER_TRADE_PCT: float = float(_y("risk_management", "risk_per_trade_pct", 0.02))
+    RISK_ATR_STOP_MULT: float = float(_y("risk_management", "atr_stop_multiplier", 1.5))
+    RISK_TP_RATIO: float = float(_y("risk_management", "take_profit_ratio", 2.0))
+
+    # ── Portfolio Manager ────────────────────────────────────
+    PM_TA_WEIGHT: float = float(_y("portfolio_manager", "ta_weight", 0.65))
+    PM_SENTIMENT_WEIGHT: float = float(_y("portfolio_manager", "sentiment_weight", 0.35))
+    PM_BUY_THRESHOLD: float = float(_y("portfolio_manager", "buy_threshold", 0.25))
+    PM_SELL_THRESHOLD: float = float(_y("portfolio_manager", "sell_threshold", -0.25))
+
+    # ── Scheduler ────────────────────────────────────────────
+    SCHED_INTERVAL: int = int(_y("scheduler", "interval_minutes", 15))
+
+    # ── Backtesting ──────────────────────────────────────────
+    BT_INITIAL_CAPITAL: float = float(_y("backtest", "initial_capital", 100_000))
+    BT_DAYS: int = int(_y("backtest", "days", 365))
 
     @classmethod
     def validate(cls) -> bool:

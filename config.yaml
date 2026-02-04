@@ -1,0 +1,80 @@
+# ─────────────────────────────────────────────────────────────
+#  Automated Trading Agents — Configuration
+# ─────────────────────────────────────────────────────────────
+#  Copy this file to config.yaml and adjust values as needed.
+#  All parameters here can also be overridden via CLI flags or
+#  environment variables (env vars take highest precedence).
+# ─────────────────────────────────────────────────────────────
+
+# Alpaca API (override via .env or env vars)
+alpaca:
+  base_url: "https://paper-api.alpaca.markets"
+
+# General
+trading:
+  mode: paper
+  default_symbols:
+    - AAPL
+    - MSFT
+    - GOOGL
+    - AMZN
+    - TSLA
+  timeframe: 1Day            # 1Min, 5Min, 15Min, 1Hour, 1Day
+
+# Technical Analysis Agent
+technical_analysis:
+  rsi_period: 14
+  rsi_oversold: 30
+  rsi_overbought: 70
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  bb_period: 20
+  bb_std: 2
+  ema_short: 9
+  ema_long: 21
+  stochastic_period: 14
+  stochastic_smooth: 3
+  stochastic_oversold: 20
+  stochastic_overbought: 80
+  adx_period: 14
+  adx_trend_threshold: 25    # ADX > 25 = trending market
+  buy_threshold: 2
+  sell_threshold: -2
+
+# Sentiment Analysis Agent
+sentiment_analysis:
+  news_limit: 20
+  lookback_days: 7
+  bullish_threshold: 0.15
+  bearish_threshold: -0.15
+  decay_half_life_hours: 48
+
+# Risk Management Agent
+risk_management:
+  max_position_pct: 0.10     # Max 10% of equity in one stock
+  max_portfolio_exposure: 0.90  # Max 90% of equity deployed
+  risk_per_trade_pct: 0.02   # Risk 2% of equity per trade
+  atr_stop_multiplier: 1.5
+  take_profit_ratio: 2.0     # 2:1 reward-to-risk
+
+# Portfolio Manager
+portfolio_manager:
+  ta_weight: 0.65
+  sentiment_weight: 0.35
+  buy_threshold: 0.25
+  sell_threshold: -0.25
+
+# Scheduler
+scheduler:
+  interval_minutes: 15
+  no_wait: false
+
+# Backtesting
+backtest:
+  initial_capital: 100000
+  days: 365
+
+# Logging
+logging:
+  level: INFO                # DEBUG, INFO, WARNING, ERROR

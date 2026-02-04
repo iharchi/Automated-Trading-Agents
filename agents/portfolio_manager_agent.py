@@ -37,7 +37,7 @@ DEFAULT_TA_WEIGHT = 0.65
 DEFAULT_SENTIMENT_WEIGHT = 0.35
 BUY_THRESHOLD = 0.25
 SELL_THRESHOLD = -0.25
-TA_MAX_SCORE = 4  # 4 voting indicators, each ±1
+TA_MAX_SCORE = 6  # 6 voting indicators, each ±1
 
 
 @dataclass

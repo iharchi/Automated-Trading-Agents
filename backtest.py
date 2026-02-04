@@ -45,6 +45,12 @@ EMA_SHORT = 9
 EMA_LONG = 21
 BB_PERIOD = 20
 BB_STD = 2
+STOCH_PERIOD = 14
+STOCH_SMOOTH = 3
+STOCH_OVERSOLD = 20
+STOCH_OVERBOUGHT = 80
+ADX_PERIOD = 14
+ADX_TREND_THRESHOLD = 25
 BUY_THRESHOLD = 2
 SELL_THRESHOLD = -2
 
@@ -138,6 +144,19 @@ class Backtester:
         df["ema_short"] = ta_lib.trend.EMAIndicator(close, window=EMA_SHORT).ema_indicator()
         df["ema_long"] = ta_lib.trend.EMAIndicator(close, window=EMA_LONG).ema_indicator()
 
+        # Stochastic Oscillator
+        stoch = ta_lib.momentum.StochasticOscillator(
+            high, low, close, window=STOCH_PERIOD, smooth_window=STOCH_SMOOTH,
+        )
+        df["stoch_k"] = stoch.stoch()
+        df["stoch_d"] = stoch.stoch_signal()
+
+        # ADX
+        adx_ind = ta_lib.trend.ADXIndicator(high, low, close, window=ADX_PERIOD)
+        df["adx"] = adx_ind.adx()
+        df["adx_plus_di"] = adx_ind.adx_pos()
+        df["adx_minus_di"] = adx_ind.adx_neg()
+
         # ATR
         df["atr"] = (
             ta_lib.volatility.AverageTrueRange(high, low, close, window=RSI_PERIOD)
@@ -174,6 +193,19 @@ class Backtester:
             score += 1
         elif row["ema_short"] < row["ema_long"]:
             score -= 1
+
+        # Stochastic Oscillator
+        if row["stoch_k"] <= STOCH_OVERSOLD and row["stoch_d"] <= STOCH_OVERSOLD:
+            score += 1
+        elif row["stoch_k"] >= STOCH_OVERBOUGHT and row["stoch_d"] >= STOCH_OVERBOUGHT:
+            score -= 1
+
+        # ADX
+        if row["adx"] >= ADX_TREND_THRESHOLD:
+            if row["adx_plus_di"] > row["adx_minus_di"]:
+                score += 1
+            else:
+                score -= 1
 
         return score
 

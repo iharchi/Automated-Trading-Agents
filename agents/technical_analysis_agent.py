@@ -9,6 +9,8 @@ Indicators used:
     - MACD (12, 26, 9)
     - Bollinger Bands (20, 2)
     - EMA crossover (short=9, long=21)
+    - Stochastic Oscillator (14, 3)
+    - ADX (14) — trend strength filter
     - ATR (14) — for position-sizing context, not signal generation
 """
 
@@ -28,6 +30,9 @@ logger = logging.getLogger(__name__)
 
 RSI_OVERSOLD = 30
 RSI_OVERBOUGHT = 70
+STOCH_OVERSOLD = 20
+STOCH_OVERBOUGHT = 80
+ADX_TREND_THRESHOLD = 25
 
 # Each indicator vote is +1 (bullish), -1 (bearish), or 0 (neutral).
 # The composite score is the sum; thresholds for action:
@@ -69,6 +74,9 @@ class TechnicalAnalysisAgent(BaseAgent):
         ema_long: int = 21,
         bb_period: int = 20,
         bb_std: int = 2,
+        stoch_period: int = 14,
+        stoch_smooth: int = 3,
+        adx_period: int = 14,
         auto_trade: bool = False,
         default_qty: int = 1,
     ):
@@ -78,6 +86,9 @@ class TechnicalAnalysisAgent(BaseAgent):
         self.ema_long = ema_long
         self.bb_period = bb_period
         self.bb_std = bb_std
+        self.stoch_period = stoch_period
+        self.stoch_smooth = stoch_smooth
+        self.adx_period = adx_period
         self.auto_trade = auto_trade
         self.default_qty = default_qty
 
@@ -138,6 +149,44 @@ class TechnicalAnalysisAgent(BaseAgent):
         return IndicatorResult(name="EMA_Cross", value=round(ema_s - ema_l, 4), signal=sig, detail=detail)
 
     @staticmethod
+    def _compute_stochastic(
+        high: pd.Series, low: pd.Series, close: pd.Series,
+        period: int = 14, smooth: int = 3,
+    ) -> IndicatorResult:
+        stoch = ta.momentum.StochasticOscillator(
+            high, low, close, window=period, smooth_window=smooth,
+        )
+        k = stoch.stoch().iloc[-1]
+        d = stoch.stoch_signal().iloc[-1]
+
+        if k <= STOCH_OVERSOLD and d <= STOCH_OVERSOLD:
+            sig, detail = 1, f"Stoch %K={k:.1f} %D={d:.1f} — oversold"
+        elif k >= STOCH_OVERBOUGHT and d >= STOCH_OVERBOUGHT:
+            sig, detail = -1, f"Stoch %K={k:.1f} %D={d:.1f} — overbought"
+        else:
+            sig, detail = 0, f"Stoch %K={k:.1f} %D={d:.1f} — neutral"
+        return IndicatorResult(name="Stochastic", value=round(k, 2), signal=sig, detail=detail)
+
+    @staticmethod
+    def _compute_adx(
+        high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14,
+    ) -> IndicatorResult:
+        adx_ind = ta.trend.ADXIndicator(high, low, close, window=period)
+        adx = adx_ind.adx().iloc[-1]
+        plus_di = adx_ind.adx_pos().iloc[-1]
+        minus_di = adx_ind.adx_neg().iloc[-1]
+
+        if adx >= ADX_TREND_THRESHOLD:
+            # Strong trend — vote with the direction
+            if plus_di > minus_di:
+                sig, detail = 1, f"ADX {adx:.1f} trending UP (+DI={plus_di:.1f} > -DI={minus_di:.1f})"
+            else:
+                sig, detail = -1, f"ADX {adx:.1f} trending DOWN (-DI={minus_di:.1f} > +DI={plus_di:.1f})"
+        else:
+            sig, detail = 0, f"ADX {adx:.1f} — no strong trend"
+        return IndicatorResult(name="ADX", value=round(adx, 2), signal=sig, detail=detail)
+
+    @staticmethod
     def _compute_atr(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> float:
         return round(
             ta.volatility.AverageTrueRange(high, low, close, window=period)
@@ -167,6 +216,8 @@ class TechnicalAnalysisAgent(BaseAgent):
             self._compute_macd(close),
             self._compute_bollinger(close, self.bb_period, self.bb_std),
             self._compute_ema_crossover(close, self.ema_short, self.ema_long),
+            self._compute_stochastic(high, low, close, self.stoch_period, self.stoch_smooth),
+            self._compute_adx(high, low, close, self.adx_period),
         ]
 
         composite = sum(ind.signal for ind in indicators)
