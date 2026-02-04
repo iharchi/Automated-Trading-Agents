@@ -26,3 +26,7 @@ Thumbs.db
 # Logs
 *.log
 logs/
+
+# Trade journal data
+journal/
+utils/journal/

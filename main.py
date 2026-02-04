@@ -23,6 +23,7 @@ from agents.technical_analysis_agent import TechnicalAnalysisAgent
 from agents.sentiment_analysis_agent import SentimentAnalysisAgent
 from agents.risk_management_agent import RiskManagementAgent
 from agents.portfolio_manager_agent import PortfolioManagerAgent
+from utils.trade_journal import TradeJournal
 
 # Individual agents for standalone mode
 STANDALONE_AGENTS = {
@@ -198,12 +199,15 @@ def main():
         return
 
     # ── Full pipeline via Portfolio Manager ──────────────────
+    journal = TradeJournal()
+
     print(f"\nTrading mode : {Settings.TRADING_MODE}")
     print(f"Pipeline     : Portfolio Manager (TA + Sentiment + Risk)")
     print(f"Weights      : TA={args.ta_weight:.0%}  Sentiment={args.sentiment_weight:.0%}")
     print(f"Symbols      : {', '.join(symbols)}")
     print(f"Timeframe    : {args.timeframe}")
-    print(f"Auto-trade   : {'ON' if args.auto_trade else 'OFF'}\n")
+    print(f"Auto-trade   : {'ON' if args.auto_trade else 'OFF'}")
+    print(f"Journal      : {journal.journal_dir}\n")
 
     pm = PortfolioManagerAgent(
         ta_weight=args.ta_weight,
@@ -216,11 +220,29 @@ def main():
             decision = pm.analyze(symbol, timeframe=args.timeframe)
             print(PortfolioManagerAgent.format_analysis(decision))
 
+            # Log signals and decision to journal
+            for sig in decision.get("agent_signals", []):
+                s = sig if isinstance(sig, dict) else sig.__dict__
+                journal.log_signal(
+                    symbol=symbol,
+                    agent=s.get("agent", ""),
+                    signal=s.get("signal", "HOLD"),
+                    score=s.get("normalised_score", 0),
+                    price=decision.get("current_price", 0),
+                )
+            journal.log_decision(decision)
+
             if args.auto_trade:
                 result = pm.execute(symbol, decision)
                 order = result.get("order")
                 if order and order not in (None, "skipped_no_position"):
                     print(f"  Order placed: {order}")
+                    journal.log_order(
+                        symbol=symbol,
+                        side="buy" if decision.get("signal") == "BUY" else "sell",
+                        qty=decision.get("position_size", 0),
+                        order_result=order,
+                    )
         except Exception as e:
             logging.getLogger("main").error(
                 "Error in portfolio pipeline for %s: %s", symbol, e,
