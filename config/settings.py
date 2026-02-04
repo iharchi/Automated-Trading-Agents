@@ -101,6 +101,16 @@ class Settings:
     SCAN_MIN_SCORE: int = int(_y("scanner", "min_score", 2))
     SCAN_RATE_LIMIT: float = float(_y("scanner", "rate_limit_delay", 0.1))
 
+    # ── Trailing Stops ──────────────────────────────────────
+    TRAIL_ENABLED: bool = _y("trailing_stops", "enabled", True)
+    TRAIL_DEFAULT_MODE: str = _y("trailing_stops", "default_mode", "percentage")
+    TRAIL_PERCENTAGE: float = float(_y("trailing_stops", "trail_percentage", 5.0))
+    TRAIL_ATR_MULTIPLIER: float = float(_y("trailing_stops", "trail_atr_multiplier", 2.0))
+    TRAIL_FIXED_AMOUNT: float = float(_y("trailing_stops", "trail_fixed_amount", 5.0))
+    TRAIL_STEP_THRESHOLD: float = float(_y("trailing_stops", "step_threshold", 2.0))
+    TRAIL_AUTO_SYNC: bool = _y("trailing_stops", "auto_sync", True)
+    TRAIL_PERSIST_STATE: bool = _y("trailing_stops", "persist_state", True)
+
     # ── Notifications ────────────────────────────────────────
     NOTIFY_ENABLED_EVENTS: list[str] = _y(
         "notifications", "enabled_events",

@@ -30,3 +30,6 @@ logs/
 # Trade journal data
 journal/
 utils/journal/
+
+# Runtime data
+data/

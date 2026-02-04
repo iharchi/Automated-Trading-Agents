@@ -99,6 +99,17 @@ scanner:
   min_score: 2                  # Minimum absolute score to include
   rate_limit_delay: 0.1         # Seconds between API calls (avoid throttling)
 
+# Trailing Stop Manager
+trailing_stops:
+  enabled: true                 # Enable trailing stop management
+  default_mode: percentage      # percentage, atr, fixed, or stepped
+  trail_percentage: 5.0         # For percentage mode: trail by X%
+  trail_atr_multiplier: 2.0     # For ATR mode: trail by X * ATR
+  trail_fixed_amount: 5.0       # For fixed mode: trail by $X
+  step_threshold: 2.0           # For stepped mode: min % move to trigger update
+  auto_sync: true               # Sync with broker positions on startup
+  persist_state: true           # Save state to file for recovery
+
 # Logging
 logging:
   level: INFO                # DEBUG, INFO, WARNING, ERROR

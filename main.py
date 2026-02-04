@@ -19,6 +19,9 @@ Usage:
     python main.py --scan                  # Scan default watchlist for opportunities
     python main.py --scan --source NASDAQ100_TOP50 --top-n 15
     python main.py --scan --source /path/to/symbols.csv --signal-filter buy
+    python main.py --positions             # Show positions with trailing stop status
+    python main.py --update-stops          # Update trailing stops based on current prices
+    python main.py --trail-mode atr        # Set trailing mode (percentage, atr, fixed, stepped)
 """
 
 import argparse
@@ -35,6 +38,7 @@ from agents.multi_timeframe_agent import MultiTimeframeAgent
 from utils.trade_journal import TradeJournal
 from utils.notifier import Notifier
 from utils.watchlist_scanner import WatchlistScanner
+from utils.trailing_stop_manager import TrailingStopManager
 
 # Individual agents for standalone mode
 STANDALONE_AGENTS = {
@@ -247,6 +251,33 @@ def main():
         action="store_true",
         help="List available built-in watchlists",
     )
+    parser.add_argument(
+        "--positions",
+        action="store_true",
+        help="Show current positions with trailing stop status",
+    )
+    parser.add_argument(
+        "--update-stops",
+        action="store_true",
+        help="Update trailing stops based on current prices",
+    )
+    parser.add_argument(
+        "--trail-mode",
+        choices=["percentage", "atr", "fixed", "stepped"],
+        default=None,
+        help="Trailing stop mode for new positions",
+    )
+    parser.add_argument(
+        "--trail-value",
+        type=float,
+        default=None,
+        help="Trail value (percent, ATR multiplier, or dollar amount depending on mode)",
+    )
+    parser.add_argument(
+        "--sync-stops",
+        action="store_true",
+        help="Sync trailing stops with broker positions",
+    )
     args = parser.parse_args()
 
     setup_logging()
@@ -306,6 +337,86 @@ def main():
         if args.export_csv:
             WatchlistScanner.to_csv(summary, args.export_csv)
             print(f"Results exported to {args.export_csv}\n")
+        return
+
+    # ── Positions / Trailing Stops mode ───────────────────────
+    if args.positions or args.update_stops or args.sync_stops:
+        from utils.alpaca_client import AlpacaClient
+
+        client = AlpacaClient()
+        trail_mode = args.trail_mode or Settings.TRAIL_DEFAULT_MODE
+        trail_value = args.trail_value
+        if trail_value is None:
+            if trail_mode == "percentage":
+                trail_value = Settings.TRAIL_PERCENTAGE
+            elif trail_mode == "atr":
+                trail_value = Settings.TRAIL_ATR_MULTIPLIER
+            elif trail_mode == "fixed":
+                trail_value = Settings.TRAIL_FIXED_AMOUNT
+            else:
+                trail_value = Settings.TRAIL_PERCENTAGE
+
+        manager = TrailingStopManager(
+            client=client,
+            auto_sync=Settings.TRAIL_AUTO_SYNC,
+        )
+
+        # Sync with broker if requested
+        if args.sync_stops:
+            print("\nSyncing trailing stops with broker positions...")
+            result = manager.sync_with_broker()
+            print(f"  Added: {', '.join(result['added']) or 'none'}")
+            print(f"  Removed: {', '.join(result['removed']) or 'none'}\n")
+
+        # Update stops based on current prices
+        if args.update_stops:
+            print("\nUpdating trailing stops...")
+            positions = manager.list_positions()
+            if not positions:
+                print("  No positions to update.\n")
+            else:
+                # Get current prices
+                prices = {}
+                for pos in positions:
+                    try:
+                        quote = client.get_latest_quote(pos.symbol)
+                        prices[pos.symbol] = (quote["ask_price"] + quote["bid_price"]) / 2
+                    except Exception as e:
+                        logging.getLogger("main").warning(
+                            "Could not get price for %s: %s", pos.symbol, e
+                        )
+
+                updates = manager.update_stops(prices)
+                if updates:
+                    print(manager.format_updates(updates))
+                else:
+                    print("  No stops needed adjustment.\n")
+
+        # Show positions
+        if args.positions:
+            positions = [manager.get_status(p.symbol) for p in manager.list_positions()]
+            if positions:
+                print(TrailingStopManager.format_status(positions))
+            else:
+                print("\n  No tracked positions.\n")
+
+            # Also show broker positions for reference
+            try:
+                broker_positions = client.get_positions()
+                if broker_positions:
+                    print("  Broker Positions:")
+                    print(f"  {'Symbol':<8} {'Qty':>8} {'Price':>10} {'P&L':>12}")
+                    print(f"  {'-' * 8} {'-' * 8} {'-' * 10} {'-' * 12}")
+                    for p in broker_positions:
+                        print(
+                            f"  {p['symbol']:<8} {p['qty']:>8} "
+                            f"${p['current_price']:>9.2f} "
+                            f"${p['unrealized_pl']:>11.2f}"
+                        )
+                    print()
+            except Exception as e:
+                logging.getLogger("main").warning("Could not fetch broker positions: %s", e)
+
         return
 
     # ── Backtest mode ────────────────────────────────────────
