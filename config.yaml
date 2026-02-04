@@ -91,6 +91,14 @@ backtest:
   initial_capital: 100000
   days: 365
 
+# Watchlist Scanner
+scanner:
+  default_source: SP500_TOP50   # SP500_TOP50, NASDAQ100_TOP50, POPULAR_TECH, HIGH_DIVIDEND, ETFS, or CSV path
+  top_n: 10                     # Number of top candidates to show
+  signal_filter: all            # all, buy, or sell
+  min_score: 2                  # Minimum absolute score to include
+  rate_limit_delay: 0.1         # Seconds between API calls (avoid throttling)
+
 # Logging
 logging:
   level: INFO                # DEBUG, INFO, WARNING, ERROR

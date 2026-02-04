@@ -94,6 +94,13 @@ class Settings:
     BT_INITIAL_CAPITAL: float = float(_y("backtest", "initial_capital", 100_000))
     BT_DAYS: int = int(_y("backtest", "days", 365))
 
+    # ── Watchlist Scanner ───────────────────────────────────
+    SCAN_DEFAULT_SOURCE: str = _y("scanner", "default_source", "SP500_TOP50")
+    SCAN_TOP_N: int = int(_y("scanner", "top_n", 10))
+    SCAN_SIGNAL_FILTER: str = _y("scanner", "signal_filter", "all")
+    SCAN_MIN_SCORE: int = int(_y("scanner", "min_score", 2))
+    SCAN_RATE_LIMIT: float = float(_y("scanner", "rate_limit_delay", 0.1))
+
     # ── Notifications ────────────────────────────────────────
     NOTIFY_ENABLED_EVENTS: list[str] = _y(
         "notifications", "enabled_events",

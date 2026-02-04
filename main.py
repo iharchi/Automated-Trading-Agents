@@ -16,6 +16,9 @@ Usage:
     python main.py --ta-weight 0.7 --sentiment-weight 0.3   # Custom weights
     python main.py --backtest AAPL         # Backtest TA strategy on AAPL
     python main.py --backtest AAPL --days 730 --capital 50000
+    python main.py --scan                  # Scan default watchlist for opportunities
+    python main.py --scan --source NASDAQ100_TOP50 --top-n 15
+    python main.py --scan --source /path/to/symbols.csv --signal-filter buy
 """
 
 import argparse
@@ -31,6 +34,7 @@ from agents.execution_agent import ExecutionAgent
 from agents.multi_timeframe_agent import MultiTimeframeAgent
 from utils.trade_journal import TradeJournal
 from utils.notifier import Notifier
+from utils.watchlist_scanner import WatchlistScanner
 
 # Individual agents for standalone mode
 STANDALONE_AGENTS = {
@@ -205,6 +209,44 @@ def main():
         default=10,
         help="Number of recent decisions in dashboard (default: 10)",
     )
+    parser.add_argument(
+        "--scan",
+        action="store_true",
+        help="Scan a watchlist for trading opportunities",
+    )
+    parser.add_argument(
+        "--source",
+        default=None,
+        help="Watchlist source: SP500_TOP50, NASDAQ100_TOP50, POPULAR_TECH, HIGH_DIVIDEND, ETFS, CSV path, or comma-separated symbols",
+    )
+    parser.add_argument(
+        "--top-n",
+        type=int,
+        default=None,
+        help="Number of top candidates to show (default from config)",
+    )
+    parser.add_argument(
+        "--signal-filter",
+        choices=["all", "buy", "sell"],
+        default=None,
+        help="Filter results by signal type (default: all)",
+    )
+    parser.add_argument(
+        "--min-score",
+        type=int,
+        default=None,
+        help="Minimum absolute score to include (default from config)",
+    )
+    parser.add_argument(
+        "--export-csv",
+        default=None,
+        help="Export scan results to CSV file",
+    )
+    parser.add_argument(
+        "--list-watchlists",
+        action="store_true",
+        help="List available built-in watchlists",
+    )
     args = parser.parse_args()
 
     setup_logging()
@@ -221,6 +263,49 @@ def main():
 
         symbol_filter = symbols[0] if len(symbols) == 1 else None
         print(render_dashboard(symbol=symbol_filter, last=args.last))
+        return
+
+    # ── List watchlists ────────────────────────────────────────
+    if args.list_watchlists:
+        print("\nAvailable built-in watchlists:")
+        for name in WatchlistScanner.list_watchlists():
+            print(f"  - {name}")
+        print("\nYou can also use:")
+        print("  - Path to a CSV file with a 'symbol' column")
+        print("  - Comma-separated symbols (e.g., 'AAPL,MSFT,GOOGL')")
+        print("  - 'alpaca' to scan tradeable Alpaca assets\n")
+        return
+
+    # ── Scan mode ──────────────────────────────────────────────
+    if args.scan:
+        source = args.source or Settings.SCAN_DEFAULT_SOURCE
+        top_n = args.top_n if args.top_n is not None else Settings.SCAN_TOP_N
+        signal_filter = args.signal_filter or Settings.SCAN_SIGNAL_FILTER
+        min_score = args.min_score if args.min_score is not None else Settings.SCAN_MIN_SCORE
+
+        print(f"\nWatchlist Scanner")
+        print(f"Source       : {source}")
+        print(f"Timeframe    : {args.timeframe}")
+        print(f"Top N        : {top_n}")
+        print(f"Filter       : {signal_filter}")
+        print(f"Min Score    : {min_score}")
+        print(f"Scanning...\n")
+
+        scanner = WatchlistScanner(
+            timeframe=args.timeframe,
+            rate_limit_delay=Settings.SCAN_RATE_LIMIT,
+        )
+        summary = scanner.scan(
+            source=source,
+            top_n=top_n,
+            signal_filter=signal_filter,
+            min_score=min_score,
+        )
+        print(WatchlistScanner.format_results(summary))
+
+        if args.export_csv:
+            WatchlistScanner.to_csv(summary, args.export_csv)
+            print(f"Results exported to {args.export_csv}\n")
         return
 
     # ── Backtest mode ────────────────────────────────────────
