@@ -65,6 +65,13 @@ portfolio_manager:
   buy_threshold: 0.25
   sell_threshold: -0.25
 
+# Execution Agent
+execution:
+  max_retries: 2
+  retry_delay: 1.0            # seconds between retries
+  fill_check_delay: 1.0       # seconds before checking fill
+  fill_check_attempts: 3
+
 # Scheduler
 scheduler:
   interval_minutes: 15

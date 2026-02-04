@@ -9,6 +9,7 @@ Usage:
     python main.py --agent risk            # TA + Risk (no sentiment)
     python main.py --test                  # Run connection test only
     python main.py --auto-trade            # Enable paper-trade execution
+    python main.py --dry-run               # Full pipeline with execution checks (no orders)
     python main.py --ta-weight 0.7 --sentiment-weight 0.3   # Custom weights
     python main.py --backtest AAPL         # Backtest TA strategy on AAPL
     python main.py --backtest AAPL --days 730 --capital 50000
@@ -23,6 +24,7 @@ from agents.technical_analysis_agent import TechnicalAnalysisAgent
 from agents.sentiment_analysis_agent import SentimentAnalysisAgent
 from agents.risk_management_agent import RiskManagementAgent
 from agents.portfolio_manager_agent import PortfolioManagerAgent
+from agents.execution_agent import ExecutionAgent
 from utils.trade_journal import TradeJournal
 
 # Individual agents for standalone mode
@@ -105,6 +107,11 @@ def main():
         "--auto-trade",
         action="store_true",
         help="Enable paper-trade order execution",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Run full pipeline including execution checks, but skip actual order placement",
     )
     parser.add_argument(
         "--timeframe",
@@ -217,21 +224,27 @@ def main():
                 )
         return
 
-    # ── Full pipeline via Portfolio Manager ──────────────────
+    # ── Full pipeline via Portfolio Manager + Execution Agent ─
     journal = TradeJournal()
+    execute_orders = args.auto_trade or args.dry_run
 
     print(f"\nTrading mode : {Settings.TRADING_MODE}")
-    print(f"Pipeline     : Portfolio Manager (TA + Sentiment + Risk)")
+    print(f"Pipeline     : Portfolio Manager (TA + Sentiment + Risk) → Execution")
     print(f"Weights      : TA={args.ta_weight:.0%}  Sentiment={args.sentiment_weight:.0%}")
     print(f"Symbols      : {', '.join(symbols)}")
     print(f"Timeframe    : {args.timeframe}")
     print(f"Auto-trade   : {'ON' if args.auto_trade else 'OFF'}")
+    print(f"Dry-run      : {'ON' if args.dry_run else 'OFF'}")
     print(f"Journal      : {journal.journal_dir}\n")
 
     pm = PortfolioManagerAgent(
         ta_weight=args.ta_weight,
         sentiment_weight=args.sentiment_weight,
-        auto_trade=args.auto_trade,
+        auto_trade=False,  # execution handled by ExecutionAgent now
+    )
+    exec_agent = ExecutionAgent(
+        client=pm.client,
+        dry_run=args.dry_run,
     )
 
     for symbol in symbols:
@@ -251,16 +264,29 @@ def main():
                 )
             journal.log_decision(decision)
 
-            if args.auto_trade:
-                result = pm.execute(symbol, decision)
-                order = result.get("order")
-                if order and order not in (None, "skipped_no_position"):
-                    print(f"  Order placed: {order}")
+            # ── Execution Agent ──────────────────────────
+            if execute_orders:
+                exec_analysis = exec_agent.analyze(symbol, decision=decision)
+                exec_result = exec_agent.execute(symbol, exec_analysis)
+                print(ExecutionAgent.format_analysis(exec_result))
+
+                # Journal the order outcome
+                side = exec_result.get("side", "")
+                qty = exec_result.get("qty", 0)
+                status = exec_result.get("status", "skipped")
+
+                if status not in ("skipped",):
+                    order_info = {
+                        "id": exec_result.get("order_id", ""),
+                        "status": status,
+                        "type": exec_result.get("order_type", "market"),
+                    }
                     journal.log_order(
                         symbol=symbol,
-                        side="buy" if decision.get("signal") == "BUY" else "sell",
-                        qty=decision.get("position_size", 0),
-                        order_result=order,
+                        side=side,
+                        qty=qty,
+                        order_result=order_info,
+                        reason=exec_result.get("error", ""),
                     )
         except Exception as e:
             logging.getLogger("main").error(
