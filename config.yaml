@@ -110,6 +110,14 @@ trailing_stops:
   auto_sync: true               # Sync with broker positions on startup
   persist_state: true           # Save state to file for recovery
 
+# Correlation Filter
+correlation:
+  enabled: true                 # Enable correlation filtering
+  threshold: 0.70               # Correlation coefficient threshold (0.0-1.0)
+  lookback_days: 90             # Days of historical data for correlation calc
+  use_sector_groups: true       # Use pre-defined sector groups for quick checks
+  cache_ttl_minutes: 60         # Cache correlation calculations
+
 # Logging
 logging:
   level: INFO                # DEBUG, INFO, WARNING, ERROR

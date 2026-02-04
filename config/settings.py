@@ -111,6 +111,13 @@ class Settings:
     TRAIL_AUTO_SYNC: bool = _y("trailing_stops", "auto_sync", True)
     TRAIL_PERSIST_STATE: bool = _y("trailing_stops", "persist_state", True)
 
+    # ── Correlation Filter ──────────────────────────────────
+    CORR_ENABLED: bool = _y("correlation", "enabled", True)
+    CORR_THRESHOLD: float = float(_y("correlation", "threshold", 0.70))
+    CORR_LOOKBACK_DAYS: int = int(_y("correlation", "lookback_days", 90))
+    CORR_USE_SECTOR_GROUPS: bool = _y("correlation", "use_sector_groups", True)
+    CORR_CACHE_TTL: int = int(_y("correlation", "cache_ttl_minutes", 60))
+
     # ── Notifications ────────────────────────────────────────
     NOTIFY_ENABLED_EVENTS: list[str] = _y(
         "notifications", "enabled_events",

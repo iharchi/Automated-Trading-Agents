@@ -22,6 +22,9 @@ Usage:
     python main.py --positions             # Show positions with trailing stop status
     python main.py --update-stops          # Update trailing stops based on current prices
     python main.py --trail-mode atr        # Set trailing mode (percentage, atr, fixed, stepped)
+    python main.py --correlation AAPL MSFT GOOGL   # Check correlation between symbols
+    python main.py --check-corr NVDA       # Check if NVDA correlates with positions
+    python main.py --list-sectors          # List available sector groups
 """
 
 import argparse
@@ -39,6 +42,7 @@ from utils.trade_journal import TradeJournal
 from utils.notifier import Notifier
 from utils.watchlist_scanner import WatchlistScanner
 from utils.trailing_stop_manager import TrailingStopManager
+from utils.correlation_filter import CorrelationFilter
 
 # Individual agents for standalone mode
 STANDALONE_AGENTS = {
@@ -278,6 +282,28 @@ def main():
         action="store_true",
         help="Sync trailing stops with broker positions",
     )
+    parser.add_argument(
+        "--correlation",
+        action="store_true",
+        help="Show correlation matrix for symbols",
+    )
+    parser.add_argument(
+        "--check-corr",
+        metavar="SYMBOL",
+        default=None,
+        help="Check if a symbol is correlated with current positions",
+    )
+    parser.add_argument(
+        "--list-sectors",
+        action="store_true",
+        help="List available sector groups for correlation",
+    )
+    parser.add_argument(
+        "--corr-threshold",
+        type=float,
+        default=None,
+        help="Correlation threshold (0.0-1.0, default from config)",
+    )
     args = parser.parse_args()
 
     setup_logging()
@@ -418,6 +444,64 @@ def main():
                 logging.getLogger("main").warning("Could not fetch broker positions: %s", e)
 
         return
+
+    # ── Correlation mode ──────────────────────────────────────
+    if args.correlation or args.check_corr or args.list_sectors:
+        threshold = args.corr_threshold or Settings.CORR_THRESHOLD
+
+        # List sector groups
+        if args.list_sectors:
+            print("\nAvailable sector groups:")
+            for group in CorrelationFilter.list_sector_groups():
+                members = CorrelationFilter(client=None).get_group_members(group)
+                print(f"  {group}: {', '.join(members[:5])}{'...' if len(members) > 5 else ''}")
+            print()
+            return
+
+        from utils.alpaca_client import AlpacaClient
+        client = AlpacaClient()
+
+        corr_filter = CorrelationFilter(
+            client=client,
+            threshold=threshold,
+            lookback_days=Settings.CORR_LOOKBACK_DAYS,
+            use_sector_groups=Settings.CORR_USE_SECTOR_GROUPS,
+        )
+
+        # Check correlation of a symbol against positions
+        if args.check_corr:
+            try:
+                positions = client.get_positions()
+                existing = [p["symbol"] for p in positions]
+
+                if not existing:
+                    print(f"\n  No existing positions to check {args.check_corr} against.\n")
+                else:
+                    result = corr_filter.check_correlation(args.check_corr, existing, threshold=threshold)
+                    print(CorrelationFilter.format_correlation_result(result))
+            except Exception as e:
+                logging.getLogger("main").error("Error checking correlation: %s", e)
+            return
+
+        # Show correlation matrix for symbols
+        if args.correlation:
+            if len(symbols) < 2:
+                print("\n  Need at least 2 symbols for correlation matrix.\n")
+                return
+
+            print(f"\nCalculating correlation matrix for {len(symbols)} symbols...")
+            print(f"Threshold: {threshold:.2f}")
+            print(f"Lookback: {Settings.CORR_LOOKBACK_DAYS} days\n")
+
+            try:
+                analysis = corr_filter.analyze_portfolio_correlation(symbols)
+                print(CorrelationFilter.format_portfolio_analysis(analysis))
+
+                if analysis.get("matrix"):
+                    print(CorrelationFilter.format_correlation_matrix(analysis["matrix"]))
+            except Exception as e:
+                logging.getLogger("main").error("Error calculating correlations: %s", e)
+            return
 
     # ── Backtest mode ────────────────────────────────────────
     if args.backtest:
