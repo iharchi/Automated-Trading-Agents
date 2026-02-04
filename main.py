@@ -141,6 +141,17 @@ def main():
         default=100_000,
         help="Initial capital for backtesting (default: 100000)",
     )
+    parser.add_argument(
+        "--dashboard",
+        action="store_true",
+        help="Show performance dashboard from journal data",
+    )
+    parser.add_argument(
+        "--last",
+        type=int,
+        default=10,
+        help="Number of recent decisions in dashboard (default: 10)",
+    )
     args = parser.parse_args()
 
     setup_logging()
@@ -150,6 +161,14 @@ def main():
         sys.exit(0 if success else 1)
 
     symbols = args.symbols or Settings.DEFAULT_SYMBOLS
+
+    # ── Dashboard mode ─────────────────────────────────────────
+    if args.dashboard:
+        from dashboard import render_dashboard
+
+        symbol_filter = symbols[0] if len(symbols) == 1 else None
+        print(render_dashboard(symbol=symbol_filter, last=args.last))
+        return
 
     # ── Backtest mode ────────────────────────────────────────
     if args.backtest:
