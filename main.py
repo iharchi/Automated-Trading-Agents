@@ -10,6 +10,8 @@ Usage:
     python main.py --test                  # Run connection test only
     python main.py --auto-trade            # Enable paper-trade execution
     python main.py --ta-weight 0.7 --sentiment-weight 0.3   # Custom weights
+    python main.py --backtest AAPL         # Backtest TA strategy on AAPL
+    python main.py --backtest AAPL --days 730 --capital 50000
 """
 
 import argparse
@@ -121,6 +123,23 @@ def main():
         default=0.35,
         help="Weight for Sentiment Analysis signals (default: 0.35)",
     )
+    parser.add_argument(
+        "--backtest",
+        action="store_true",
+        help="Run backtesting simulation instead of live analysis",
+    )
+    parser.add_argument(
+        "--days",
+        type=int,
+        default=365,
+        help="Lookback period in days for backtesting (default: 365)",
+    )
+    parser.add_argument(
+        "--capital",
+        type=float,
+        default=100_000,
+        help="Initial capital for backtesting (default: 100000)",
+    )
     args = parser.parse_args()
 
     setup_logging()
@@ -130,6 +149,26 @@ def main():
         sys.exit(0 if success else 1)
 
     symbols = args.symbols or Settings.DEFAULT_SYMBOLS
+
+    # ── Backtest mode ────────────────────────────────────────
+    if args.backtest:
+        from backtest import Backtester
+
+        print(f"\nBacktest Mode")
+        print(f"Capital      : ${args.capital:,.0f}")
+        print(f"Period       : {args.days} days")
+        print(f"Symbols      : {', '.join(symbols)}\n")
+
+        bt = Backtester(initial_capital=args.capital)
+        for symbol in symbols:
+            try:
+                result = bt.run(symbol, days=args.days)
+                print(Backtester.format_result(result))
+            except Exception as e:
+                logging.getLogger("main").error(
+                    "Backtest error for %s: %s", symbol, e,
+                )
+        return
 
     # ── Standalone agent mode ────────────────────────────────
     if args.agent:
