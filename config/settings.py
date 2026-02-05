@@ -111,6 +111,14 @@ class Settings:
     TRAIL_AUTO_SYNC: bool = _y("trailing_stops", "auto_sync", True)
     TRAIL_PERSIST_STATE: bool = _y("trailing_stops", "persist_state", True)
 
+    # ── Unified Pipeline ──────────────────────────────────
+    PIPELINE_ENABLE_REGIME: bool = _y("pipeline", "enable_regime", True)
+    PIPELINE_ENABLE_CORRELATION: bool = _y("pipeline", "enable_correlation", True)
+    PIPELINE_ENABLE_TRAILING: bool = _y("pipeline", "enable_trailing_stops", True)
+    PIPELINE_ENABLE_EVENTS: bool = _y("pipeline", "enable_events", True)
+    PIPELINE_ENABLE_JOURNAL: bool = _y("pipeline", "enable_journal", True)
+    PIPELINE_ENABLE_NOTIFY: bool = _y("pipeline", "enable_notifications", True)
+
     # ── Correlation Filter ──────────────────────────────────
     CORR_ENABLED: bool = _y("correlation", "enabled", True)
     CORR_THRESHOLD: float = float(_y("correlation", "threshold", 0.70))

@@ -49,6 +49,7 @@ from utils.market_regime import MarketRegimeDetector
 from utils.signal_aggregator import SignalAggregator
 from utils.position_sizer import PositionSizer
 from utils.event_bus import EventBus
+from utils.trading_pipeline import TradingPipeline
 
 # Individual agents for standalone mode
 STANDALONE_AGENTS = {
@@ -352,6 +353,13 @@ def main():
         action="store_true",
         help="Enable event bus and show event history after pipeline run",
     )
+    parser.add_argument(
+        "--pipeline",
+        action="store_true",
+        help="Run unified trading pipeline (Regime → TA → Sentiment → "
+             "Aggregator → Correlation → Kelly Sizer → Risk → Execute → "
+             "Trailing Stops).  Combine with --auto-trade or --dry-run.",
+    )
     args = parser.parse_args()
 
     setup_logging()
@@ -361,6 +369,86 @@ def main():
         sys.exit(0 if success else 1)
 
     symbols = args.symbols or Settings.DEFAULT_SYMBOLS
+
+    # ── Unified Pipeline mode ─────────────────────────────────
+    if args.pipeline:
+        from utils.alpaca_client import AlpacaClient
+        from utils.notifier import Notifier
+
+        client = AlpacaClient()
+        notifier_instance = create_notifier() if Settings.PIPELINE_ENABLE_NOTIFY else None
+
+        aggregator = SignalAggregator(
+            weights={
+                "ta": Settings.AGG_TA_WEIGHT,
+                "sentiment": Settings.AGG_SENTIMENT_WEIGHT,
+                "mtf": Settings.AGG_MTF_WEIGHT,
+                "regime": Settings.AGG_REGIME_WEIGHT,
+            },
+            buy_threshold=Settings.AGG_BUY_THRESHOLD,
+            sell_threshold=Settings.AGG_SELL_THRESHOLD,
+            min_sources=Settings.AGG_MIN_SOURCES,
+            regime_adaptive=Settings.AGG_REGIME_ADAPTIVE,
+            agreement_bonus=Settings.AGG_AGREEMENT_BONUS,
+        )
+        sizer = PositionSizer(
+            kelly_factor=Settings.SIZER_KELLY_FACTOR,
+            max_position_pct=Settings.SIZER_MAX_POSITION_PCT,
+            max_portfolio_heat=Settings.SIZER_MAX_PORTFOLIO_HEAT,
+            atr_risk_mult=Settings.SIZER_ATR_RISK_MULT,
+            take_profit_ratio=Settings.SIZER_TP_RATIO,
+            default_win_rate=Settings.SIZER_DEFAULT_WIN_RATE,
+            default_payoff_ratio=Settings.SIZER_DEFAULT_PAYOFF,
+            vol_target=Settings.SIZER_VOL_TARGET,
+        )
+        bus = EventBus(
+            strict=Settings.EVENTBUS_STRICT,
+            max_history=Settings.EVENTBUS_MAX_HISTORY,
+        ) if Settings.PIPELINE_ENABLE_EVENTS else None
+
+        pipeline = TradingPipeline(
+            client=client,
+            dry_run=args.dry_run,
+            aggregator=aggregator,
+            sizer=sizer,
+            event_bus=bus,
+            notifier=notifier_instance,
+            enable_regime=Settings.PIPELINE_ENABLE_REGIME,
+            enable_correlation=Settings.PIPELINE_ENABLE_CORRELATION,
+            enable_trailing_stops=Settings.PIPELINE_ENABLE_TRAILING,
+            enable_events=Settings.PIPELINE_ENABLE_EVENTS,
+            enable_journal=Settings.PIPELINE_ENABLE_JOURNAL,
+            enable_notifications=Settings.PIPELINE_ENABLE_NOTIFY,
+        )
+
+        mode = "DRY-RUN" if args.dry_run else (
+            "AUTO-TRADE" if args.auto_trade else "ANALYSIS ONLY"
+        )
+        print(f"\n{'=' * 66}")
+        print(f"  UNIFIED TRADING PIPELINE")
+        print(f"{'=' * 66}")
+        print(f"  Mode       : {mode}")
+        print(f"  Symbols    : {', '.join(symbols)}")
+        print(f"  Timeframe  : {args.timeframe}")
+        print(f"  Regime     : {'ON' if Settings.PIPELINE_ENABLE_REGIME else 'OFF'}")
+        print(f"  Correlation: {'ON' if Settings.PIPELINE_ENABLE_CORRELATION else 'OFF'}")
+        print(f"  Sizer      : Kelly ({Settings.SIZER_KELLY_FACTOR:.0%})")
+        print(f"  Trail stops: {'ON' if Settings.PIPELINE_ENABLE_TRAILING else 'OFF'}")
+        print(f"  Event Bus  : {'ON' if bus else 'OFF'}")
+        print(f"{'=' * 66}\n")
+
+        results = pipeline.run(symbols, timeframe=args.timeframe)
+
+        for r in results:
+            print(TradingPipeline.format_result(r))
+
+        print(TradingPipeline.format_summary(results))
+
+        if bus and args.events:
+            history = bus.get_history(limit=50)
+            print(EventBus.format_history(history))
+
+        return
 
     # ── Dashboard mode ─────────────────────────────────────────
     if args.dashboard:

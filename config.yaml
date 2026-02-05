@@ -110,6 +110,15 @@ trailing_stops:
   auto_sync: true               # Sync with broker positions on startup
   persist_state: true           # Save state to file for recovery
 
+# Unified Trading Pipeline
+pipeline:
+  enable_regime: true             # Include market regime detection
+  enable_correlation: true        # Check correlation before new positions
+  enable_trailing_stops: true     # Register trailing stops for new fills
+  enable_events: true             # Publish events to the event bus
+  enable_journal: true            # Log signals, decisions, and orders
+  enable_notifications: true      # Send notifications on signals/orders
+
 # Correlation Filter
 correlation:
   enabled: true                 # Enable correlation filtering
