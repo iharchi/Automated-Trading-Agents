@@ -148,6 +148,12 @@ class Settings:
     REGIME_VOL_LOOKBACK: int = int(_y("regime", "vol_lookback", 20))
     REGIME_SLOPE_LOOKBACK: int = int(_y("regime", "slope_lookback", 5))
 
+    # ── Event Bus ──────────────────────────────────────────
+    EVENTBUS_ENABLED: bool = _y("event_bus", "enabled", True)
+    EVENTBUS_STRICT: bool = _y("event_bus", "strict_mode", False)
+    EVENTBUS_MAX_HISTORY: int = int(_y("event_bus", "max_history", 100))
+    EVENTBUS_LOG_EVENTS: bool = _y("event_bus", "log_events", False)
+
     # ── Notifications ────────────────────────────────────────
     NOTIFY_ENABLED_EVENTS: list[str] = _y(
         "notifications", "enabled_events",

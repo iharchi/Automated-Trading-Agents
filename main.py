@@ -48,6 +48,7 @@ from utils.correlation_filter import CorrelationFilter
 from utils.market_regime import MarketRegimeDetector
 from utils.signal_aggregator import SignalAggregator
 from utils.position_sizer import PositionSizer
+from utils.event_bus import EventBus
 
 # Individual agents for standalone mode
 STANDALONE_AGENTS = {
@@ -345,6 +346,11 @@ def main():
         "--with-correlation",
         action="store_true",
         help="Include correlation filtering in aggregation",
+    )
+    parser.add_argument(
+        "--events",
+        action="store_true",
+        help="Enable event bus and show event history after pipeline run",
     )
     args = parser.parse_args()
 
@@ -647,20 +653,41 @@ def main():
         ta_agent = TechnicalAnalysisAgent(client=client, auto_trade=False)
         sent_agent = SentimentAnalysisAgent(client=client, auto_trade=False)
 
+        # Event bus (optional)
+        bus = None
+        if args.events and Settings.EVENTBUS_ENABLED:
+            bus = EventBus(
+                strict=Settings.EVENTBUS_STRICT,
+                max_history=Settings.EVENTBUS_MAX_HISTORY,
+            )
+
         print(f"\nSignal Aggregation Pipeline")
         print(f"Symbols      : {', '.join(symbols)}")
         print(f"Timeframe    : {args.timeframe}")
         print(f"Regime-aware : {'ON' if args.with_regime else 'OFF'}")
-        print(f"Corr filter  : {'ON' if args.with_correlation else 'OFF'}\n")
+        print(f"Corr filter  : {'ON' if args.with_correlation else 'OFF'}")
+        print(f"Event bus    : {'ON' if bus else 'OFF'}\n")
 
         for symbol in symbols:
             try:
                 # Collect signals
                 ta_result = ta_agent.analyze(symbol, timeframe=args.timeframe)
                 print(TechnicalAnalysisAgent.format_analysis(ta_result))
+                if bus:
+                    bus.emit_signal(
+                        symbol, ta_result.get("signal", "HOLD"),
+                        ta_result.get("composite_score", 0),
+                        source="TechnicalAnalysis",
+                    )
 
                 sent_result = sent_agent.analyze(symbol, timeframe=args.timeframe)
                 print(SentimentAnalysisAgent.format_analysis(sent_result))
+                if bus:
+                    bus.emit_signal(
+                        symbol, sent_result.get("signal", "HOLD"),
+                        sent_result.get("composite_score", 0),
+                        source="SentimentAnalysis",
+                    )
 
                 regime_res = None
                 if args.with_regime:
@@ -677,6 +704,13 @@ def main():
                     regime_obj = detector.detect(symbol, timeframe=args.timeframe)
                     print(MarketRegimeDetector.format_result(regime_obj))
                     regime_res = regime_obj.__dict__
+                    if bus:
+                        bus.publish(
+                            "regime_changed",
+                            {"new_regime": regime_obj.regime, "confidence": regime_obj.confidence},
+                            source="MarketRegimeDetector",
+                            symbol=symbol,
+                        )
 
                 corr_result = None
                 if args.with_correlation:
@@ -695,6 +729,13 @@ def main():
                             )
                             if hasattr(corr_result, "__dict__"):
                                 corr_result = corr_result.__dict__
+                            if bus and corr_result.get("is_correlated"):
+                                bus.publish(
+                                    "correlation_alert",
+                                    {"correlated_with": corr_result.get("correlated_with", [])},
+                                    source="CorrelationFilter",
+                                    symbol=symbol,
+                                )
                     except Exception as e:
                         logging.getLogger("main").warning(
                             "Correlation check failed for %s: %s", symbol, e,
@@ -708,10 +749,29 @@ def main():
                     correlation_result=corr_result,
                 )
                 print(SignalAggregator.format_result(agg))
+
+                if bus:
+                    bus.publish(
+                        "aggregation_done",
+                        {
+                            "signal": agg.signal,
+                            "combined_score": agg.combined_score,
+                            "confidence": agg.confidence,
+                            "source_count": agg.source_count,
+                        },
+                        source="SignalAggregator",
+                        symbol=symbol,
+                    )
             except Exception as e:
                 logging.getLogger("main").error(
                     "Error in aggregation for %s: %s", symbol, e,
                 )
+
+        # Show event history
+        if bus:
+            history = bus.get_history(limit=50)
+            print(EventBus.format_history(history))
+
         return
 
     # ── Backtest mode ────────────────────────────────────────

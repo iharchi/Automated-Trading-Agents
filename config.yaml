@@ -151,6 +151,13 @@ regime:
   vol_lookback: 20              # Days for volatility calculation
   slope_lookback: 5             # Bars for slope calculation
 
+# Event Bus
+event_bus:
+  enabled: true                   # Enable event bus for inter-component communication
+  strict_mode: false              # If true, only allow well-known event types
+  max_history: 100                # Number of recent events to retain
+  log_events: false               # Log all events to console
+
 # Logging
 logging:
   level: INFO                # DEBUG, INFO, WARNING, ERROR
