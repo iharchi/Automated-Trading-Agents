@@ -118,6 +118,16 @@ correlation:
   use_sector_groups: true       # Use pre-defined sector groups for quick checks
   cache_ttl_minutes: 60         # Cache correlation calculations
 
+# Market Regime Detector
+regime:
+  adx_trend_threshold: 25.0     # ADX above this = trending
+  vol_high_threshold: 0.30      # Annualised vol above 30% = high volatility
+  bb_squeeze_percentile: 20.0   # BB width in bottom 20% = squeeze
+  ema_short_period: 9
+  ema_long_period: 50
+  vol_lookback: 20              # Days for volatility calculation
+  slope_lookback: 5             # Bars for slope calculation
+
 # Logging
 logging:
   level: INFO                # DEBUG, INFO, WARNING, ERROR

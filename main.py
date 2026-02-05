@@ -25,6 +25,8 @@ Usage:
     python main.py --correlation AAPL MSFT GOOGL   # Check correlation between symbols
     python main.py --check-corr NVDA       # Check if NVDA correlates with positions
     python main.py --list-sectors          # List available sector groups
+    python main.py --regime                # Detect market regime for symbols (default SPY)
+    python main.py --regime AAPL TSLA      # Detect regime for specific symbols
 """
 
 import argparse
@@ -43,6 +45,7 @@ from utils.notifier import Notifier
 from utils.watchlist_scanner import WatchlistScanner
 from utils.trailing_stop_manager import TrailingStopManager
 from utils.correlation_filter import CorrelationFilter
+from utils.market_regime import MarketRegimeDetector
 
 # Individual agents for standalone mode
 STANDALONE_AGENTS = {
@@ -304,6 +307,11 @@ def main():
         default=None,
         help="Correlation threshold (0.0-1.0, default from config)",
     )
+    parser.add_argument(
+        "--regime",
+        action="store_true",
+        help="Detect market regime for symbols (defaults to SPY if no symbols given)",
+    )
     args = parser.parse_args()
 
     setup_logging()
@@ -502,6 +510,35 @@ def main():
             except Exception as e:
                 logging.getLogger("main").error("Error calculating correlations: %s", e)
             return
+
+    # ── Regime detection mode ─────────────────────────────────
+    if args.regime:
+        from utils.alpaca_client import AlpacaClient
+
+        client = AlpacaClient()
+        detector = MarketRegimeDetector(
+            client=client,
+            adx_trend_threshold=Settings.REGIME_ADX_THRESHOLD,
+            vol_high_threshold=Settings.REGIME_VOL_HIGH,
+            bb_squeeze_percentile=Settings.REGIME_BB_SQUEEZE_PCT,
+            ema_short_period=Settings.REGIME_EMA_SHORT,
+            ema_long_period=Settings.REGIME_EMA_LONG,
+            vol_lookback=Settings.REGIME_VOL_LOOKBACK,
+            slope_lookback=Settings.REGIME_SLOPE_LOOKBACK,
+        )
+
+        regime_symbols = symbols if args.symbols else ["SPY"]
+
+        if len(regime_symbols) == 1:
+            result = detector.detect(regime_symbols[0], timeframe=args.timeframe)
+            print(MarketRegimeDetector.format_result(result))
+        else:
+            results = detector.detect_multi(regime_symbols, timeframe=args.timeframe)
+            print(MarketRegimeDetector.format_multi(results))
+            # Also print detailed results
+            for result in results.values():
+                print(MarketRegimeDetector.format_result(result))
+        return
 
     # ── Backtest mode ────────────────────────────────────────
     if args.backtest:

@@ -118,6 +118,15 @@ class Settings:
     CORR_USE_SECTOR_GROUPS: bool = _y("correlation", "use_sector_groups", True)
     CORR_CACHE_TTL: int = int(_y("correlation", "cache_ttl_minutes", 60))
 
+    # ── Market Regime Detector ──────────────────────────────
+    REGIME_ADX_THRESHOLD: float = float(_y("regime", "adx_trend_threshold", 25.0))
+    REGIME_VOL_HIGH: float = float(_y("regime", "vol_high_threshold", 0.30))
+    REGIME_BB_SQUEEZE_PCT: float = float(_y("regime", "bb_squeeze_percentile", 20.0))
+    REGIME_EMA_SHORT: int = int(_y("regime", "ema_short_period", 9))
+    REGIME_EMA_LONG: int = int(_y("regime", "ema_long_period", 50))
+    REGIME_VOL_LOOKBACK: int = int(_y("regime", "vol_lookback", 20))
+    REGIME_SLOPE_LOOKBACK: int = int(_y("regime", "slope_lookback", 5))
+
     # ── Notifications ────────────────────────────────────────
     NOTIFY_ENABLED_EVENTS: list[str] = _y(
         "notifications", "enabled_events",
