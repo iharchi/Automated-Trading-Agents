@@ -206,3 +206,55 @@ notifications:
   # Generic webhook — URL via env var: NOTIFY_WEBHOOK_URL
   webhook:
     enabled: false
+
+# Portfolio Rebalancer
+rebalancer:
+  mode: equal_weight            # equal_weight, custom, market_cap
+  drift_threshold: 0.05         # 5% drift triggers rebalance
+  max_single_rebalance_pct: 0.25  # Max 25% of equity in one rebalance order
+  min_order_value: 100.0        # Skip orders below $100
+  custom_weights: {}            # e.g. {AAPL: 0.25, MSFT: 0.25, ...}
+
+# Performance Analytics
+performance_analytics:
+  risk_free_rate: 0.05          # Annual risk-free rate for Sharpe/Sortino
+  trading_days_year: 252
+
+# Walk-Forward Optimization
+walk_forward:
+  is_ratio: 0.70                # 70% in-sample, 30% out-of-sample
+  num_windows: 5                # Number of rolling windows
+  min_trades: 3                 # Min trades per window for valid result
+  risk_per_trade: 0.02
+  atr_stop_mult: 1.5
+  take_profit_ratio: 2.0
+
+# Order Management System
+order_manager:
+  reconcile_interval: 60        # Seconds between reconciliation checks
+  fill_check_interval: 5        # Seconds between fill checks
+  max_open_orders: 20           # Max concurrent open orders
+
+# Mean Reversion Strategy
+mean_reversion:
+  bb_period: 20
+  bb_std: 2.0
+  rsi_period: 14
+  rsi_oversold: 30
+  rsi_overbought: 70
+  z_entry_threshold: 1.5        # Z-score entry threshold
+  z_exit_threshold: 0.0         # Exit when z-score crosses 0
+  stoch_period: 14
+  stoch_smooth: 3
+  stoch_oversold: 20
+  stoch_overbought: 80
+  adx_max_threshold: 25.0       # Only trade when ADX < this (ranging market)
+  atr_stop_mult: 1.5
+  take_profit_ratio: 2.0
+  min_confirmations: 2          # Min indicators agreeing for signal
+
+# Web Dashboard
+dashboard:
+  host: "127.0.0.1"
+  port: 5000
+  refresh_interval: 30          # Auto-refresh seconds

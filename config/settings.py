@@ -214,6 +214,51 @@ class Settings:
     )
     NOTIFY_WEBHOOK_URL: str = os.getenv("NOTIFY_WEBHOOK_URL", "")
 
+    # ── Portfolio Rebalancer ──────────────────────────────────
+    REBAL_MODE: str = _y("rebalancer", "mode", "equal_weight")
+    REBAL_DRIFT_THRESHOLD: float = float(_y("rebalancer", "drift_threshold", 0.05))
+    REBAL_MAX_SINGLE_PCT: float = float(_y("rebalancer", "max_single_rebalance_pct", 0.25))
+    REBAL_MIN_ORDER_VALUE: float = float(_y("rebalancer", "min_order_value", 100.0))
+
+    # ── Performance Analytics ─────────────────────────────────
+    PERF_RISK_FREE_RATE: float = float(_y("performance_analytics", "risk_free_rate", 0.05))
+    PERF_TRADING_DAYS_YEAR: int = int(_y("performance_analytics", "trading_days_year", 252))
+
+    # ── Walk-Forward Optimization ─────────────────────────────
+    WFO_IS_RATIO: float = float(_y("walk_forward", "is_ratio", 0.70))
+    WFO_NUM_WINDOWS: int = int(_y("walk_forward", "num_windows", 5))
+    WFO_MIN_TRADES: int = int(_y("walk_forward", "min_trades", 3))
+    WFO_RISK_PER_TRADE: float = float(_y("walk_forward", "risk_per_trade", 0.02))
+    WFO_ATR_STOP_MULT: float = float(_y("walk_forward", "atr_stop_mult", 1.5))
+    WFO_TP_RATIO: float = float(_y("walk_forward", "take_profit_ratio", 2.0))
+
+    # ── Order Management System ───────────────────────────────
+    OMS_RECONCILE_INTERVAL: int = int(_y("order_manager", "reconcile_interval", 60))
+    OMS_FILL_CHECK_INTERVAL: int = int(_y("order_manager", "fill_check_interval", 5))
+    OMS_MAX_OPEN_ORDERS: int = int(_y("order_manager", "max_open_orders", 20))
+
+    # ── Mean Reversion Strategy ───────────────────────────────
+    MR_BB_PERIOD: int = int(_y("mean_reversion", "bb_period", 20))
+    MR_BB_STD: float = float(_y("mean_reversion", "bb_std", 2.0))
+    MR_RSI_PERIOD: int = int(_y("mean_reversion", "rsi_period", 14))
+    MR_RSI_OVERSOLD: int = int(_y("mean_reversion", "rsi_oversold", 30))
+    MR_RSI_OVERBOUGHT: int = int(_y("mean_reversion", "rsi_overbought", 70))
+    MR_Z_ENTRY: float = float(_y("mean_reversion", "z_entry_threshold", 1.5))
+    MR_Z_EXIT: float = float(_y("mean_reversion", "z_exit_threshold", 0.0))
+    MR_STOCH_PERIOD: int = int(_y("mean_reversion", "stoch_period", 14))
+    MR_STOCH_SMOOTH: int = int(_y("mean_reversion", "stoch_smooth", 3))
+    MR_STOCH_OVERSOLD: int = int(_y("mean_reversion", "stoch_oversold", 20))
+    MR_STOCH_OVERBOUGHT: int = int(_y("mean_reversion", "stoch_overbought", 80))
+    MR_ADX_MAX: float = float(_y("mean_reversion", "adx_max_threshold", 25.0))
+    MR_ATR_STOP_MULT: float = float(_y("mean_reversion", "atr_stop_mult", 1.5))
+    MR_TP_RATIO: float = float(_y("mean_reversion", "take_profit_ratio", 2.0))
+    MR_MIN_CONFIRMATIONS: int = int(_y("mean_reversion", "min_confirmations", 2))
+
+    # ── Web Dashboard ─────────────────────────────────────────
+    DASH_HOST: str = _y("dashboard", "host", "127.0.0.1")
+    DASH_PORT: int = int(_y("dashboard", "port", 5000))
+    DASH_REFRESH: int = int(_y("dashboard", "refresh_interval", 30))
+
     @classmethod
     def validate(cls) -> bool:
         """Check that required keys are set."""
