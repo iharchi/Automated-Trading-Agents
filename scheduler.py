@@ -1,19 +1,23 @@
-"""Market-Hours Scheduler
+"""Market-Hours Scheduler (Unified Pipeline)
 
-Runs the Portfolio Manager pipeline on a configurable interval during
+Runs the Unified Trading Pipeline on a configurable interval during
 market hours.  Sleeps between cycles and stops when the market closes.
 
 Usage:
-    python scheduler.py                             # defaults: 15 min interval
+    python scheduler.py                             # defaults: 15 min interval, dry-run
     python scheduler.py AAPL TSLA --interval 30     # 30 min interval
     python scheduler.py --once                      # single pass then exit
+    python scheduler.py --auto-trade                # enable live paper-trade execution
+    python scheduler.py --skip-preflight            # skip pre-flight health checks
 
 The scheduler:
-    1. Checks if the market is open (via Alpaca clock API).
-    2. If open, runs the full pipeline for each symbol.
-    3. Logs all signals, decisions, and orders to the trade journal.
-    4. Sleeps for --interval minutes and repeats.
-    5. If the market is closed, calculates time until next open and
+    1. Runs pre-flight health checks (API, account, buying power, data).
+    2. Checks if the market is open (via Alpaca clock API).
+    3. If open, runs the Unified Trading Pipeline for all symbols.
+    4. Logs all signals, decisions, and orders via the pipeline's journal.
+    5. Publishes events to the Event Bus throughout.
+    6. Sleeps for --interval minutes and repeats.
+    7. If the market is closed, calculates time until next open and
        waits (or exits if --no-wait is set).
 """
 
@@ -25,9 +29,13 @@ import time
 from datetime import datetime, timezone
 
 from config.settings import Settings
-from agents.portfolio_manager_agent import PortfolioManagerAgent
 from utils.alpaca_client import AlpacaClient
-from utils.trade_journal import TradeJournal
+from utils.event_bus import EventBus
+from utils.notifier import Notifier
+from utils.position_sizer import PositionSizer
+from utils.preflight import PreflightCheck
+from utils.signal_aggregator import SignalAggregator
+from utils.trading_pipeline import TradingPipeline
 
 logger = logging.getLogger("scheduler")
 
@@ -45,63 +53,124 @@ signal.signal(signal.SIGINT, _handle_signal)
 signal.signal(signal.SIGTERM, _handle_signal)
 
 
+# ── Pipeline factory ─────────────────────────────────────────────
+
+def create_pipeline(
+    client: AlpacaClient,
+    *,
+    dry_run: bool = True,
+    notifier: Notifier | None = None,
+    event_bus: EventBus | None = None,
+) -> TradingPipeline:
+    """Build a TradingPipeline wired from Settings."""
+    aggregator = SignalAggregator(
+        weights={
+            "ta": Settings.AGG_TA_WEIGHT,
+            "sentiment": Settings.AGG_SENTIMENT_WEIGHT,
+            "mtf": Settings.AGG_MTF_WEIGHT,
+            "regime": Settings.AGG_REGIME_WEIGHT,
+        },
+        buy_threshold=Settings.AGG_BUY_THRESHOLD,
+        sell_threshold=Settings.AGG_SELL_THRESHOLD,
+        min_sources=Settings.AGG_MIN_SOURCES,
+        regime_adaptive=Settings.AGG_REGIME_ADAPTIVE,
+        agreement_bonus=Settings.AGG_AGREEMENT_BONUS,
+    )
+    sizer = PositionSizer(
+        kelly_factor=Settings.SIZER_KELLY_FACTOR,
+        max_position_pct=Settings.SIZER_MAX_POSITION_PCT,
+        max_portfolio_heat=Settings.SIZER_MAX_PORTFOLIO_HEAT,
+        atr_risk_mult=Settings.SIZER_ATR_RISK_MULT,
+        take_profit_ratio=Settings.SIZER_TP_RATIO,
+        default_win_rate=Settings.SIZER_DEFAULT_WIN_RATE,
+        default_payoff_ratio=Settings.SIZER_DEFAULT_PAYOFF,
+        vol_target=Settings.SIZER_VOL_TARGET,
+    )
+
+    return TradingPipeline(
+        client=client,
+        dry_run=dry_run,
+        aggregator=aggregator,
+        sizer=sizer,
+        event_bus=event_bus,
+        notifier=notifier,
+        enable_regime=Settings.PIPELINE_ENABLE_REGIME,
+        enable_correlation=Settings.PIPELINE_ENABLE_CORRELATION,
+        enable_trailing_stops=Settings.PIPELINE_ENABLE_TRAILING,
+        enable_events=Settings.PIPELINE_ENABLE_EVENTS,
+        enable_journal=Settings.PIPELINE_ENABLE_JOURNAL,
+        enable_notifications=Settings.PIPELINE_ENABLE_NOTIFY,
+    )
+
+
+def create_notifier() -> Notifier:
+    """Build a Notifier from Settings."""
+    return Notifier(
+        email_enabled=Settings.NOTIFY_EMAIL_ENABLED,
+        smtp_host=Settings.NOTIFY_SMTP_HOST,
+        smtp_port=Settings.NOTIFY_SMTP_PORT,
+        smtp_user=Settings.NOTIFY_SMTP_USER,
+        smtp_password=Settings.NOTIFY_SMTP_PASSWORD,
+        email_from=Settings.NOTIFY_EMAIL_FROM,
+        email_to=Settings.NOTIFY_EMAIL_TO,
+        slack_enabled=Settings.NOTIFY_SLACK_ENABLED,
+        slack_webhook_url=Settings.NOTIFY_SLACK_WEBHOOK,
+        discord_enabled=Settings.NOTIFY_DISCORD_ENABLED,
+        discord_webhook_url=Settings.NOTIFY_DISCORD_WEBHOOK,
+        webhook_enabled=Settings.NOTIFY_WEBHOOK_ENABLED,
+        webhook_url=Settings.NOTIFY_WEBHOOK_URL,
+        enabled_events=Settings.NOTIFY_ENABLED_EVENTS,
+        min_signal_score=Settings.NOTIFY_MIN_SIGNAL_SCORE,
+    )
+
+
+# ── Cycle runner ─────────────────────────────────────────────────
+
 def run_cycle(
-    pm: PortfolioManagerAgent,
+    pipeline: TradingPipeline,
     symbols: list[str],
-    journal: TradeJournal,
-    auto_trade: bool,
     timeframe: str,
-) -> None:
-    """Run one full analysis + optional trade cycle."""
+    cycle_number: int = 0,
+) -> list:
+    """Run one full analysis + trade cycle via the unified pipeline.
+
+    Returns:
+        List of PipelineResult objects.
+    """
     now = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
-    print(f"\n--- Cycle start: {now} ---")
+    print(f"\n--- Cycle #{cycle_number} start: {now} ---")
 
-    for symbol in symbols:
-        try:
-            decision = pm.analyze(symbol, timeframe=timeframe)
-            print(PortfolioManagerAgent.format_analysis(decision))
+    try:
+        results = pipeline.run(symbols, timeframe=timeframe)
 
-            # Log individual agent signals
-            for sig in decision.get("agent_signals", []):
-                s = sig if isinstance(sig, dict) else sig.__dict__
-                journal.log_signal(
-                    symbol=symbol,
-                    agent=s.get("agent", ""),
-                    signal=s.get("signal", "HOLD"),
-                    score=s.get("normalised_score", 0),
-                    price=decision.get("current_price", 0),
-                )
+        # Print per-symbol results
+        for r in results:
+            print(TradingPipeline.format_result(r))
 
-            # Log the combined decision
-            journal.log_decision(decision)
+        # Print summary table
+        print(TradingPipeline.format_summary(results))
 
-            # Execute if auto-trade is on
-            if auto_trade:
-                result = pm.execute(symbol, decision)
-                order = result.get("order")
-                if order and order not in (None, "skipped_no_position"):
-                    print(f"  Order placed: {order}")
-                    journal.log_order(
-                        symbol=symbol,
-                        side="buy" if decision.get("signal") == "BUY" else "sell",
-                        qty=decision.get("position_size", 0),
-                        order_result=order,
-                        reason=f"signal={decision.get('signal')}",
-                    )
-                elif decision.get("signal") != "HOLD":
-                    journal.log_order(
-                        symbol=symbol,
-                        side="buy" if decision.get("signal") == "BUY" else "sell",
-                        qty=decision.get("position_size", 0),
-                        order_result="skipped",
-                        reason="auto_trade=off or risk_rejected",
-                    )
+        # Stats
+        buys = sum(1 for r in results if r.signal == "BUY")
+        sells = sum(1 for r in results if r.signal == "SELL")
+        executed = sum(1 for r in results if r.executed)
+        errors = sum(1 for r in results if r.error)
 
-        except Exception as e:
-            logger.error("Error processing %s: %s", symbol, e)
+        print(
+            f"--- Cycle #{cycle_number} complete: "
+            f"{buys} BUY / {sells} SELL / {executed} executed / "
+            f"{errors} errors ---\n"
+        )
 
-    print(f"--- Cycle complete ---\n")
+        return results
 
+    except Exception as e:
+        logger.error("Cycle %d failed: %s", cycle_number, e)
+        print(f"--- Cycle #{cycle_number} FAILED: {e} ---\n")
+        return []
+
+
+# ── Market hours wait ────────────────────────────────────────────
 
 def wait_for_market_open(client: AlpacaClient, no_wait: bool) -> bool:
     """Wait until market opens. Returns False if --no-wait and market is closed."""
@@ -131,14 +200,45 @@ def wait_for_market_open(client: AlpacaClient, no_wait: bool) -> bool:
     return not _shutdown
 
 
+# ── Pre-flight ───────────────────────────────────────────────────
+
+def run_preflight(
+    client: AlpacaClient,
+    *,
+    min_buying_power: float = 1000.0,
+    require_market_open: bool = False,
+) -> bool:
+    """Run pre-flight health checks. Returns True if all pass."""
+    pf = PreflightCheck(
+        client,
+        min_buying_power=min_buying_power,
+        require_market_open=require_market_open,
+    )
+    report = pf.run_all()
+    print(PreflightCheck.format_report(report))
+
+    if not report.passed:
+        logger.error("Pre-flight checks FAILED. Aborting scheduler.")
+        return False
+
+    if report.warnings:
+        logger.warning(
+            "Pre-flight passed with %d warning(s).", len(report.warnings),
+        )
+
+    return True
+
+
+# ── Main ─────────────────────────────────────────────────────────
+
 def main():
-    parser = argparse.ArgumentParser(description="Market-Hours Scheduler")
+    parser = argparse.ArgumentParser(description="Market-Hours Scheduler (Unified Pipeline)")
     parser.add_argument("symbols", nargs="*", help="Ticker symbols")
     parser.add_argument(
         "--interval",
         type=int,
-        default=15,
-        help="Minutes between analysis cycles (default: 15)",
+        default=None,
+        help="Minutes between analysis cycles (default from config)",
     )
     parser.add_argument(
         "--once",
@@ -153,7 +253,13 @@ def main():
     parser.add_argument(
         "--auto-trade",
         action="store_true",
-        help="Enable paper-trade order execution",
+        help="Enable paper-trade order execution (default is dry-run)",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=True,
+        help="Run pipeline without placing real orders (default)",
     )
     parser.add_argument(
         "--timeframe",
@@ -162,21 +268,20 @@ def main():
         help="Bar timeframe (default: 1Day)",
     )
     parser.add_argument(
-        "--ta-weight",
-        type=float,
-        default=0.65,
-        help="Weight for TA signals (default: 0.65)",
+        "--skip-preflight",
+        action="store_true",
+        help="Skip pre-flight health checks",
     )
     parser.add_argument(
-        "--sentiment-weight",
+        "--min-buying-power",
         type=float,
-        default=0.35,
-        help="Weight for Sentiment signals (default: 0.35)",
-    )
-    parser.add_argument(
-        "--journal-dir",
         default=None,
-        help="Directory for journal CSV files (default: ./utils/journal/)",
+        help="Minimum buying power for preflight (default from config)",
+    )
+    parser.add_argument(
+        "--show-events",
+        action="store_true",
+        help="Show event bus history after each cycle",
     )
     args = parser.parse_args()
 
@@ -186,37 +291,79 @@ def main():
         datefmt="%H:%M:%S",
     )
 
+    # Resolve settings
     symbols = args.symbols or Settings.DEFAULT_SYMBOLS
-    journal = TradeJournal(args.journal_dir) if args.journal_dir else TradeJournal()
+    interval = args.interval if args.interval is not None else Settings.SCHED_INTERVAL
+    dry_run = not args.auto_trade  # auto-trade overrides dry-run
+    min_bp = args.min_buying_power if args.min_buying_power is not None else Settings.PREFLIGHT_MIN_BUYING_POWER
+    no_wait = args.no_wait or Settings.SCHED_NO_WAIT
 
-    print(f"\nScheduler")
-    print(f"Symbols      : {', '.join(symbols)}")
-    print(f"Interval     : {args.interval} min")
-    print(f"Auto-trade   : {'ON' if args.auto_trade else 'OFF'}")
-    print(f"Journal      : {journal.journal_dir}")
-    print(f"Mode         : {'single pass' if args.once else 'continuous'}\n")
+    mode = "AUTO-TRADE" if args.auto_trade else "DRY-RUN"
+    print(f"\n{'=' * 62}")
+    print(f"  AUTOMATED TRADING SCHEDULER")
+    print(f"{'=' * 62}")
+    print(f"  Mode         : {mode}")
+    print(f"  Symbols      : {', '.join(symbols)}")
+    print(f"  Interval     : {interval} min")
+    print(f"  Timeframe    : {args.timeframe}")
+    print(f"  Regime       : {'ON' if Settings.PIPELINE_ENABLE_REGIME else 'OFF'}")
+    print(f"  Correlation  : {'ON' if Settings.PIPELINE_ENABLE_CORRELATION else 'OFF'}")
+    print(f"  Sizer        : Kelly ({Settings.SIZER_KELLY_FACTOR:.0%})")
+    print(f"  Trail stops  : {'ON' if Settings.PIPELINE_ENABLE_TRAILING else 'OFF'}")
+    print(f"  Journal      : {'ON' if Settings.PIPELINE_ENABLE_JOURNAL else 'OFF'}")
+    print(f"  Notifications: {'ON' if Settings.PIPELINE_ENABLE_NOTIFY else 'OFF'}")
+    print(f"  Schedule     : {'single pass' if args.once else 'continuous'}")
+    print(f"{'=' * 62}\n")
 
+    # Initialise client
     client = AlpacaClient()
-    pm = PortfolioManagerAgent(
-        client=client,
-        ta_weight=args.ta_weight,
-        sentiment_weight=args.sentiment_weight,
-        auto_trade=args.auto_trade,
+
+    # ── Pre-flight checks ────────────────────────────────────
+    if not args.skip_preflight:
+        if not run_preflight(
+            client,
+            min_buying_power=min_bp,
+            require_market_open=False,
+        ):
+            sys.exit(1)
+    else:
+        print("  [SKIP] Pre-flight checks skipped.\n")
+
+    # ── Build pipeline components ────────────────────────────
+    notifier_instance = create_notifier() if Settings.PIPELINE_ENABLE_NOTIFY else None
+    bus = EventBus(
+        strict=Settings.EVENTBUS_STRICT,
+        max_history=Settings.EVENTBUS_MAX_HISTORY,
+    ) if Settings.PIPELINE_ENABLE_EVENTS else None
+
+    pipeline = create_pipeline(
+        client,
+        dry_run=dry_run,
+        notifier=notifier_instance,
+        event_bus=bus,
     )
 
+    # ── Single-pass mode ─────────────────────────────────────
     if args.once:
-        run_cycle(pm, symbols, journal, args.auto_trade, args.timeframe)
+        results = run_cycle(pipeline, symbols, args.timeframe, cycle_number=1)
+        if bus and args.show_events:
+            print(EventBus.format_history(bus.get_history(limit=50)))
         return
 
     # ── Continuous loop ──────────────────────────────────────
+    cycle = 0
     while not _shutdown:
-        if not wait_for_market_open(client, args.no_wait):
+        if not wait_for_market_open(client, no_wait):
             break
 
         if _shutdown:
             break
 
-        run_cycle(pm, symbols, journal, args.auto_trade, args.timeframe)
+        cycle += 1
+        results = run_cycle(pipeline, symbols, args.timeframe, cycle_number=cycle)
+
+        if bus and args.show_events:
+            print(EventBus.format_history(bus.get_history(limit=30)))
 
         if _shutdown:
             break
@@ -224,17 +371,17 @@ def main():
         # Check if market is still open before sleeping
         if not client.is_market_open():
             logger.info("Market has closed. Cycle complete for today.")
-            if args.no_wait:
+            if no_wait:
                 break
             continue  # will wait_for_market_open on next iteration
 
-        logger.info("Sleeping %d minutes until next cycle...", args.interval)
-        sleep_seconds = args.interval * 60
+        logger.info("Sleeping %d minutes until next cycle...", interval)
+        sleep_seconds = interval * 60
         while sleep_seconds > 0 and not _shutdown:
             time.sleep(min(sleep_seconds, 10))
             sleep_seconds -= 10
 
-    print("\nScheduler stopped.")
+    print(f"\nScheduler stopped after {cycle} cycle(s).")
 
 
 if __name__ == "__main__":

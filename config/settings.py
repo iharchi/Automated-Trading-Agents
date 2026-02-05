@@ -89,6 +89,12 @@ class Settings:
 
     # ── Scheduler ────────────────────────────────────────────
     SCHED_INTERVAL: int = int(_y("scheduler", "interval_minutes", 15))
+    SCHED_NO_WAIT: bool = _y("scheduler", "no_wait", False)
+
+    # ── Pre-flight Health Checks ──────────────────────────────
+    PREFLIGHT_MIN_BUYING_POWER: float = float(_y("preflight", "min_buying_power", 1000.0))
+    PREFLIGHT_REFERENCE_SYMBOL: str = _y("preflight", "reference_symbol", "SPY")
+    PREFLIGHT_REQUIRE_MARKET_OPEN: bool = _y("preflight", "require_market_open", False)
 
     # ── Backtesting ──────────────────────────────────────────
     BT_INITIAL_CAPITAL: float = float(_y("backtest", "initial_capital", 100_000))

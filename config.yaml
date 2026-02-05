@@ -86,6 +86,12 @@ scheduler:
   interval_minutes: 15
   no_wait: false
 
+# Pre-flight Health Checks
+preflight:
+  min_buying_power: 1000.0    # Minimum buying power to start trading
+  reference_symbol: SPY        # Symbol used to test data availability
+  require_market_open: false   # If true, fail preflight when market is closed
+
 # Backtesting
 backtest:
   initial_capital: 100000
