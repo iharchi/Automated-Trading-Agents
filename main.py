@@ -46,6 +46,7 @@ from utils.watchlist_scanner import WatchlistScanner
 from utils.trailing_stop_manager import TrailingStopManager
 from utils.correlation_filter import CorrelationFilter
 from utils.market_regime import MarketRegimeDetector
+from utils.signal_aggregator import SignalAggregator
 
 # Individual agents for standalone mode
 STANDALONE_AGENTS = {
@@ -312,6 +313,21 @@ def main():
         action="store_true",
         help="Detect market regime for symbols (defaults to SPY if no symbols given)",
     )
+    parser.add_argument(
+        "--aggregate",
+        action="store_true",
+        help="Run full signal aggregation pipeline (TA + Sentiment + Regime)",
+    )
+    parser.add_argument(
+        "--with-regime",
+        action="store_true",
+        help="Include market regime detection in aggregation",
+    )
+    parser.add_argument(
+        "--with-correlation",
+        action="store_true",
+        help="Include correlation filtering in aggregation",
+    )
     args = parser.parse_args()
 
     setup_logging()
@@ -538,6 +554,94 @@ def main():
             # Also print detailed results
             for result in results.values():
                 print(MarketRegimeDetector.format_result(result))
+        return
+
+    # ── Signal Aggregation mode ────────────────────────────
+    if args.aggregate:
+        from utils.alpaca_client import AlpacaClient
+
+        client = AlpacaClient()
+        aggregator = SignalAggregator(
+            weights={
+                "ta": Settings.AGG_TA_WEIGHT,
+                "sentiment": Settings.AGG_SENTIMENT_WEIGHT,
+                "mtf": Settings.AGG_MTF_WEIGHT,
+                "regime": Settings.AGG_REGIME_WEIGHT,
+            },
+            buy_threshold=Settings.AGG_BUY_THRESHOLD,
+            sell_threshold=Settings.AGG_SELL_THRESHOLD,
+            min_sources=Settings.AGG_MIN_SOURCES,
+            regime_adaptive=Settings.AGG_REGIME_ADAPTIVE,
+            agreement_bonus=Settings.AGG_AGREEMENT_BONUS,
+        )
+        ta_agent = TechnicalAnalysisAgent(client=client, auto_trade=False)
+        sent_agent = SentimentAnalysisAgent(client=client, auto_trade=False)
+
+        print(f"\nSignal Aggregation Pipeline")
+        print(f"Symbols      : {', '.join(symbols)}")
+        print(f"Timeframe    : {args.timeframe}")
+        print(f"Regime-aware : {'ON' if args.with_regime else 'OFF'}")
+        print(f"Corr filter  : {'ON' if args.with_correlation else 'OFF'}\n")
+
+        for symbol in symbols:
+            try:
+                # Collect signals
+                ta_result = ta_agent.analyze(symbol, timeframe=args.timeframe)
+                print(TechnicalAnalysisAgent.format_analysis(ta_result))
+
+                sent_result = sent_agent.analyze(symbol, timeframe=args.timeframe)
+                print(SentimentAnalysisAgent.format_analysis(sent_result))
+
+                regime_res = None
+                if args.with_regime:
+                    detector = MarketRegimeDetector(
+                        client=client,
+                        adx_trend_threshold=Settings.REGIME_ADX_THRESHOLD,
+                        vol_high_threshold=Settings.REGIME_VOL_HIGH,
+                        bb_squeeze_percentile=Settings.REGIME_BB_SQUEEZE_PCT,
+                        ema_short_period=Settings.REGIME_EMA_SHORT,
+                        ema_long_period=Settings.REGIME_EMA_LONG,
+                        vol_lookback=Settings.REGIME_VOL_LOOKBACK,
+                        slope_lookback=Settings.REGIME_SLOPE_LOOKBACK,
+                    )
+                    regime_obj = detector.detect(symbol, timeframe=args.timeframe)
+                    print(MarketRegimeDetector.format_result(regime_obj))
+                    regime_res = regime_obj.__dict__
+
+                corr_result = None
+                if args.with_correlation:
+                    corr_filter = CorrelationFilter(
+                        client=client,
+                        threshold=Settings.CORR_THRESHOLD,
+                        lookback_days=Settings.CORR_LOOKBACK_DAYS,
+                        use_sector_groups=Settings.CORR_USE_SECTOR_GROUPS,
+                    )
+                    try:
+                        positions = client.get_positions()
+                        existing = [p["symbol"] for p in positions]
+                        if existing:
+                            corr_result = corr_filter.check_correlation(
+                                symbol, existing,
+                            )
+                            if hasattr(corr_result, "__dict__"):
+                                corr_result = corr_result.__dict__
+                    except Exception as e:
+                        logging.getLogger("main").warning(
+                            "Correlation check failed for %s: %s", symbol, e,
+                        )
+
+                agg = aggregator.aggregate(
+                    symbol,
+                    ta_result=ta_result,
+                    sentiment_result=sent_result,
+                    regime_result=regime_res,
+                    correlation_result=corr_result,
+                )
+                print(SignalAggregator.format_result(agg))
+            except Exception as e:
+                logging.getLogger("main").error(
+                    "Error in aggregation for %s: %s", symbol, e,
+                )
         return
 
     # ── Backtest mode ────────────────────────────────────────

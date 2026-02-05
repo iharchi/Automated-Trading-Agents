@@ -118,6 +118,17 @@ class Settings:
     CORR_USE_SECTOR_GROUPS: bool = _y("correlation", "use_sector_groups", True)
     CORR_CACHE_TTL: int = int(_y("correlation", "cache_ttl_minutes", 60))
 
+    # ── Signal Aggregator ─────────────────────────────────
+    AGG_TA_WEIGHT: float = float(_y("aggregator", "ta_weight", 0.40))
+    AGG_SENTIMENT_WEIGHT: float = float(_y("aggregator", "sentiment_weight", 0.20))
+    AGG_MTF_WEIGHT: float = float(_y("aggregator", "mtf_weight", 0.30))
+    AGG_REGIME_WEIGHT: float = float(_y("aggregator", "regime_weight", 0.10))
+    AGG_BUY_THRESHOLD: float = float(_y("aggregator", "buy_threshold", 0.25))
+    AGG_SELL_THRESHOLD: float = float(_y("aggregator", "sell_threshold", -0.25))
+    AGG_MIN_SOURCES: int = int(_y("aggregator", "min_sources", 1))
+    AGG_REGIME_ADAPTIVE: bool = _y("aggregator", "regime_adaptive", True)
+    AGG_AGREEMENT_BONUS: float = float(_y("aggregator", "agreement_bonus", 0.10))
+
     # ── Market Regime Detector ──────────────────────────────
     REGIME_ADX_THRESHOLD: float = float(_y("regime", "adx_trend_threshold", 25.0))
     REGIME_VOL_HIGH: float = float(_y("regime", "vol_high_threshold", 0.30))

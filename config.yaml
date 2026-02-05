@@ -118,6 +118,18 @@ correlation:
   use_sector_groups: true       # Use pre-defined sector groups for quick checks
   cache_ttl_minutes: 60         # Cache correlation calculations
 
+# Signal Aggregator
+aggregator:
+  ta_weight: 0.40
+  sentiment_weight: 0.20
+  mtf_weight: 0.30
+  regime_weight: 0.10
+  buy_threshold: 0.25
+  sell_threshold: -0.25
+  min_sources: 1                    # Minimum signal sources required
+  regime_adaptive: true             # Adjust weights based on market regime
+  agreement_bonus: 0.10             # Confidence bonus for unanimous agreement
+
 # Market Regime Detector
 regime:
   adx_trend_threshold: 25.0     # ADX above this = trending
