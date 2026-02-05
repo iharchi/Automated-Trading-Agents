@@ -118,6 +118,16 @@ class Settings:
     CORR_USE_SECTOR_GROUPS: bool = _y("correlation", "use_sector_groups", True)
     CORR_CACHE_TTL: int = int(_y("correlation", "cache_ttl_minutes", 60))
 
+    # ── Position Sizer (Kelly) ────────────────────────────
+    SIZER_KELLY_FACTOR: float = float(_y("position_sizer", "kelly_factor", 0.5))
+    SIZER_MAX_POSITION_PCT: float = float(_y("position_sizer", "max_position_pct", 0.10))
+    SIZER_MAX_PORTFOLIO_HEAT: float = float(_y("position_sizer", "max_portfolio_heat", 0.06))
+    SIZER_ATR_RISK_MULT: float = float(_y("position_sizer", "atr_risk_multiplier", 1.5))
+    SIZER_TP_RATIO: float = float(_y("position_sizer", "take_profit_ratio", 2.0))
+    SIZER_DEFAULT_WIN_RATE: float = float(_y("position_sizer", "default_win_rate", 0.50))
+    SIZER_DEFAULT_PAYOFF: float = float(_y("position_sizer", "default_payoff_ratio", 1.5))
+    SIZER_VOL_TARGET: float = float(_y("position_sizer", "vol_target", 0.15))
+
     # ── Signal Aggregator ─────────────────────────────────
     AGG_TA_WEIGHT: float = float(_y("aggregator", "ta_weight", 0.40))
     AGG_SENTIMENT_WEIGHT: float = float(_y("aggregator", "sentiment_weight", 0.20))

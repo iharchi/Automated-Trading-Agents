@@ -47,6 +47,7 @@ from utils.trailing_stop_manager import TrailingStopManager
 from utils.correlation_filter import CorrelationFilter
 from utils.market_regime import MarketRegimeDetector
 from utils.signal_aggregator import SignalAggregator
+from utils.position_sizer import PositionSizer
 
 # Individual agents for standalone mode
 STANDALONE_AGENTS = {
@@ -314,6 +315,23 @@ def main():
         help="Detect market regime for symbols (defaults to SPY if no symbols given)",
     )
     parser.add_argument(
+        "--size-position",
+        action="store_true",
+        help="Calculate Kelly-optimal position size for symbols (requires TA signal)",
+    )
+    parser.add_argument(
+        "--win-rate",
+        type=float,
+        default=None,
+        help="Historical win rate for Kelly sizing (0.0-1.0)",
+    )
+    parser.add_argument(
+        "--payoff-ratio",
+        type=float,
+        default=None,
+        help="Avg win / avg loss ratio for Kelly sizing",
+    )
+    parser.add_argument(
         "--aggregate",
         action="store_true",
         help="Run full signal aggregation pipeline (TA + Sentiment + Regime)",
@@ -554,6 +572,58 @@ def main():
             # Also print detailed results
             for result in results.values():
                 print(MarketRegimeDetector.format_result(result))
+        return
+
+    # ── Position Sizing mode ─────────────────────────────
+    if args.size_position:
+        from utils.alpaca_client import AlpacaClient
+
+        client = AlpacaClient()
+        sizer = PositionSizer(
+            kelly_factor=Settings.SIZER_KELLY_FACTOR,
+            max_position_pct=Settings.SIZER_MAX_POSITION_PCT,
+            max_portfolio_heat=Settings.SIZER_MAX_PORTFOLIO_HEAT,
+            atr_risk_mult=Settings.SIZER_ATR_RISK_MULT,
+            take_profit_ratio=Settings.SIZER_TP_RATIO,
+            default_win_rate=Settings.SIZER_DEFAULT_WIN_RATE,
+            default_payoff_ratio=Settings.SIZER_DEFAULT_PAYOFF,
+            vol_target=Settings.SIZER_VOL_TARGET,
+        )
+        ta_agent = TechnicalAnalysisAgent(client=client, auto_trade=False)
+
+        print(f"\nPosition Sizer (Kelly Criterion)")
+        print(f"Symbols      : {', '.join(symbols)}")
+        print(f"Kelly Factor : {Settings.SIZER_KELLY_FACTOR:.0%}")
+        print(f"Max Heat     : {Settings.SIZER_MAX_PORTFOLIO_HEAT:.0%}\n")
+
+        account = client.get_account()
+        equity = account["equity"]
+
+        for symbol in symbols:
+            try:
+                ta_result = ta_agent.analyze(symbol, timeframe=args.timeframe)
+                print(TechnicalAnalysisAgent.format_analysis(ta_result))
+
+                signal = ta_result.get("signal", "HOLD")
+                if signal == "HOLD":
+                    print(f"  [{symbol}] Signal is HOLD — skipping sizing.\n")
+                    continue
+
+                sizing = sizer.calculate(
+                    symbol,
+                    price=ta_result.get("current_price", 0),
+                    equity=equity,
+                    signal=signal,
+                    atr=ta_result.get("atr", 0),
+                    win_rate=args.win_rate,
+                    avg_win=None,
+                    avg_loss=None,
+                )
+                print(PositionSizer.format_result(sizing))
+            except Exception as e:
+                logging.getLogger("main").error(
+                    "Error sizing %s: %s", symbol, e,
+                )
         return
 
     # ── Signal Aggregation mode ────────────────────────────

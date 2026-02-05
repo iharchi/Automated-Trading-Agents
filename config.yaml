@@ -118,6 +118,17 @@ correlation:
   use_sector_groups: true       # Use pre-defined sector groups for quick checks
   cache_ttl_minutes: 60         # Cache correlation calculations
 
+# Position Sizer (Kelly Criterion)
+position_sizer:
+  kelly_factor: 0.5               # Fraction of Kelly to use (0.5 = half-Kelly)
+  max_position_pct: 0.10          # Max single position as % of equity
+  max_portfolio_heat: 0.06        # Max total risk across all positions (%)
+  atr_risk_multiplier: 1.5        # Stop distance = ATR * multiplier
+  take_profit_ratio: 2.0          # Reward-to-risk ratio
+  default_win_rate: 0.50          # Assumed win rate when unknown
+  default_payoff_ratio: 1.5       # Assumed avg_win/avg_loss when unknown
+  vol_target: 0.15                # Target annual volatility for vol-scaling
+
 # Signal Aggregator
 aggregator:
   ta_weight: 0.40
