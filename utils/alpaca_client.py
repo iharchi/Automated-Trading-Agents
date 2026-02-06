@@ -77,7 +77,7 @@ class AlpacaClient:
             end = datetime.now().strftime("%Y-%m-%d")
 
         bars = self.api.get_bars(
-            symbol, tf, start=start, end=end, limit=limit
+            symbol, tf, start=start, end=end, limit=limit, feed="iex"
         ).df
 
         if bars.empty:

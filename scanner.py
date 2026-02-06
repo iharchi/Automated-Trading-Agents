@@ -180,7 +180,12 @@ class MarketScanner:
         # Detect overall market regime (using SPY)
         try:
             regime_result = self.regime_detector.detect("SPY")
-            summary.market_regime = regime_result.get("regime", "UNKNOWN")
+            # RegimeResult is a dataclass with .regime attribute (Regime enum)
+            if hasattr(regime_result, "regime"):
+                regime = regime_result.regime
+                summary.market_regime = regime.value if hasattr(regime, "value") else str(regime)
+            else:
+                summary.market_regime = str(regime_result)
         except Exception as e:
             logger.warning("Could not detect market regime: %s", e)
             summary.market_regime = "UNKNOWN"
