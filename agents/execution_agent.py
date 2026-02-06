@@ -73,11 +73,13 @@ class ExecutionAgent(BaseAgent):
         client: AlpacaClient | None = None,
         *,
         dry_run: bool = False,
+        skip_market_check: bool = False,
         max_retries: int = MAX_RETRIES,
         retry_delay: float = RETRY_DELAY,
     ):
         super().__init__(name="Execution", client=client)
         self.dry_run = dry_run
+        self.skip_market_check = skip_market_check
         self.max_retries = max_retries
         self.retry_delay = retry_delay
 
@@ -128,12 +130,21 @@ class ExecutionAgent(BaseAgent):
 
     def _run_preflight(self, decision: dict) -> list[dict]:
         """Run all pre-flight checks. Returns list of check dicts."""
-        return [
+        checks = [
             self._check_signal_actionable(decision),
             self._check_risk_approved(decision),
             self._check_position_size(decision),
-            self._check_market_open(),
         ]
+        # Skip market check for paper trading / extended hours
+        if not self.skip_market_check:
+            checks.append(self._check_market_open())
+        else:
+            checks.append({
+                "rule": "market_open",
+                "passed": True,
+                "detail": "Skipped (paper trading mode)",
+            })
+        return checks
 
     # ── Order building ────────────────────────────────────────
 
@@ -170,11 +181,8 @@ class ExecutionAgent(BaseAgent):
             "time_in_force": ticket.time_in_force,
         }
 
-        # Use bracket order if both stop and take-profit are set
-        if ticket.stop_price and ticket.take_profit_price and ticket.side == "buy":
-            kwargs["order_class"] = "bracket"
-            kwargs["stop_loss"] = {"stop_price": str(ticket.stop_price)}
-            kwargs["take_profit"] = {"limit_price": str(ticket.take_profit_price)}
+        # Note: Bracket orders disabled - AlpacaClient.submit_order() doesn't support them
+        # Stop-loss and take-profit are managed separately via TrailingStopManager
 
         return self.client.submit_order(**kwargs)
 

@@ -162,6 +162,7 @@ class TradingPipeline:
         if self.exec_agent is None:
             self.exec_agent = ExecutionAgent(
                 client=self.client, dry_run=self.dry_run,
+                skip_market_check=True,  # Allow paper trading outside market hours
             )
         if self.enable_regime and self.regime_detector is None:
             self.regime_detector = MarketRegimeDetector(client=self.client)

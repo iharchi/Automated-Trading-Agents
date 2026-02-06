@@ -30,9 +30,10 @@ from utils.alpaca_client import AlpacaClient
 logger = logging.getLogger(__name__)
 
 # ── Default limits ───────────────────────────────────────────────
+# Note: Increased for paper trading flexibility. Adjust for live trading.
 
-MAX_POSITION_PCT = 0.10        # Max 10 % of equity in a single stock
-MAX_PORTFOLIO_EXPOSURE = 0.90  # Max 90 % of equity deployed
+MAX_POSITION_PCT = 0.25        # Max 25 % of equity in a single stock
+MAX_PORTFOLIO_EXPOSURE = 1.50  # Allow up to 150 % exposure (margin)
 RISK_PER_TRADE_PCT = 0.02      # Risk at most 2 % of equity per trade
 ATR_STOP_MULTIPLIER = 1.5      # Stop-loss = entry - (ATR * multiplier)
 TAKE_PROFIT_RATIO = 2.0        # Take-profit at 2:1 reward-to-risk
