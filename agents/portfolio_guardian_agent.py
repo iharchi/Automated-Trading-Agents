@@ -155,13 +155,13 @@ class GuardianStatus:
 class PortfolioGuardianAgent(BaseAgent):
     """Agent that actively protects and balances the portfolio."""
 
-    # Default limits
-    DEFAULT_TAKE_PROFIT_PCT = 0.10      # 10% profit target
-    DEFAULT_TRAILING_STOP_PCT = 0.05    # 5% trailing stop
-    DEFAULT_STOP_LOSS_PCT = 0.05        # 5% stop loss
-    DEFAULT_DAILY_LOSS_LIMIT = 0.03     # 3% daily loss limit
-    DEFAULT_MAX_DRAWDOWN = 0.10         # 10% max drawdown
-    DEFAULT_MAX_SECTOR_PCT = 0.35       # 35% max per sector
+    # Default limits (optimized for maximum profitability)
+    DEFAULT_TAKE_PROFIT_PCT = 0.15      # 15% profit target (let winners run)
+    DEFAULT_TRAILING_STOP_PCT = 0.08    # 8% trailing stop (reduce whipsaws)
+    DEFAULT_STOP_LOSS_PCT = 0.07        # 7% stop loss (allow some room)
+    DEFAULT_DAILY_LOSS_LIMIT = 0.04     # 4% daily loss limit
+    DEFAULT_MAX_DRAWDOWN = 0.12         # 12% max drawdown
+    DEFAULT_MAX_SECTOR_PCT = 0.40       # 40% max per sector (more concentration allowed)
     DEFAULT_MIN_SECTOR_PCT = 0.05       # 5% min per sector (for diversification)
 
     def __init__(

@@ -78,12 +78,12 @@ class PortfolioMetrics:
 class ProfitMonitor:
     """Monitors positions and portfolio P&L in real-time."""
 
-    # Default profit/loss thresholds
-    DEFAULT_TAKE_PROFIT_PCT = 0.10  # 10% profit target
-    DEFAULT_STOP_LOSS_PCT = 0.05    # 5% stop loss
-    DEFAULT_TRAILING_STOP_PCT = 0.05  # 5% trailing stop from peak
-    DEFAULT_DAILY_LOSS_LIMIT_PCT = 0.03  # 3% daily loss limit
-    DEFAULT_MAX_DRAWDOWN_PCT = 0.10  # 10% max drawdown
+    # Default profit/loss thresholds (optimized for profitability)
+    DEFAULT_TAKE_PROFIT_PCT = 0.15  # 15% profit target (let winners run)
+    DEFAULT_STOP_LOSS_PCT = 0.07    # 7% stop loss (allow room)
+    DEFAULT_TRAILING_STOP_PCT = 0.08  # 8% trailing stop from peak (reduce whipsaws)
+    DEFAULT_DAILY_LOSS_LIMIT_PCT = 0.04  # 4% daily loss limit
+    DEFAULT_MAX_DRAWDOWN_PCT = 0.12  # 12% max drawdown
 
     def __init__(
         self,

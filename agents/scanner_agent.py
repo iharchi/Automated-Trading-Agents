@@ -118,10 +118,10 @@ class ScannerAgent(BaseAgent):
         *,
         auto_trade: bool = False,
         dry_run: bool = True,
-        max_workers: int = 5,
-        max_trades: int = 3,
-        min_score: float = 0.0,
-        top_n: int = 10,
+        max_workers: int = 8,
+        max_trades: int = 5,
+        min_score: float = 0.05,
+        top_n: int = 15,
     ):
         super().__init__(name="Scanner", client=client)
         self.auto_trade = auto_trade

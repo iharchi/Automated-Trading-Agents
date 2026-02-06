@@ -37,13 +37,13 @@ logger = logging.getLogger(__name__)
 # ── Defaults ────────────────────────────────────────────────────
 # Note: Increased for paper trading flexibility. Adjust for live trading.
 
-DEFAULT_KELLY_FRACTION = 0.5    # Half-Kelly (recommended)
-DEFAULT_MAX_POSITION_PCT = 0.25  # Max 25% of equity per position
-DEFAULT_MAX_PORTFOLIO_HEAT = 0.20  # Max 20% of equity at risk
+DEFAULT_KELLY_FRACTION = 0.6    # 60% Kelly for better returns (paper trading)
+DEFAULT_MAX_POSITION_PCT = 0.30  # Max 30% of equity per position
+DEFAULT_MAX_PORTFOLIO_HEAT = 0.25  # Max 25% of equity at risk
 DEFAULT_ATR_RISK_MULT = 1.5    # Stop = entry - (ATR * multiplier)
-DEFAULT_TAKE_PROFIT_RATIO = 2.0  # 2:1 reward-to-risk
-DEFAULT_WIN_RATE = 0.50         # Assumed win rate if unknown
-DEFAULT_PAYOFF_RATIO = 1.5     # Assumed avg_win/avg_loss if unknown
+DEFAULT_TAKE_PROFIT_RATIO = 2.5  # 2.5:1 reward-to-risk (optimized)
+DEFAULT_WIN_RATE = 0.55         # Optimized win rate assumption
+DEFAULT_PAYOFF_RATIO = 1.75    # Optimized avg_win/avg_loss
 DEFAULT_VOL_TARGET = 0.15      # Annual vol target for vol-scaling
 
 

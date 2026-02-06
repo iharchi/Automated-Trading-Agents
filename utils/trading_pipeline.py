@@ -124,11 +124,11 @@ class TradingPipeline:
         enable_journal: bool = True,
         enable_notifications: bool = True,
         enable_guardian: bool = True,
-        # Profit protection settings
-        take_profit_pct: float = 0.10,  # 10% profit target
-        trailing_stop_pct: float = 0.05,  # 5% trailing stop
-        daily_loss_limit_pct: float = 0.03,  # 3% daily loss limit
-        max_drawdown_pct: float = 0.10,  # 10% max drawdown
+        # Profit protection settings (optimized for profitability)
+        take_profit_pct: float = 0.15,  # 15% profit target (let winners run)
+        trailing_stop_pct: float = 0.08,  # 8% trailing stop (reduce whipsaws)
+        daily_loss_limit_pct: float = 0.04,  # 4% daily loss limit
+        max_drawdown_pct: float = 0.12,  # 12% max drawdown
     ):
         self.client = client
         self.dry_run = dry_run
