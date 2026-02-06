@@ -347,6 +347,52 @@ def create_app(dashboard_data: DashboardData | None = None):
             return send_file(agents_info_path)
         return "Agents info page not found", 404
 
+    @app.route("/api/scan")
+    def api_scan():
+        """Run a quick market scan and return results."""
+        from flask import request
+        try:
+            from scanner import MarketScanner, UNIVERSES
+            universe = request.args.get("universe", "DEFAULT")
+            top_n = int(request.args.get("top", 10))
+
+            symbols = UNIVERSES.get(universe, UNIVERSES["DEFAULT"])
+            scanner = MarketScanner(client=data.client, max_workers=3)
+            summary = scanner.scan(symbols, top_n=top_n)
+
+            return jsonify({
+                "timestamp": summary.timestamp,
+                "market_regime": summary.market_regime,
+                "total_scanned": summary.total_scanned,
+                "buy_signals": summary.buy_signals,
+                "sell_signals": summary.sell_signals,
+                "scan_duration_sec": summary.scan_duration_sec,
+                "top_buys": [
+                    {
+                        "symbol": r.symbol,
+                        "score": r.combined_score,
+                        "ta_score": r.ta_score,
+                        "sentiment": r.sentiment_score,
+                        "rsi": r.rsi,
+                        "price": r.price,
+                    }
+                    for r in summary.top_buys
+                ],
+                "top_sells": [
+                    {
+                        "symbol": r.symbol,
+                        "score": r.combined_score,
+                        "ta_score": r.ta_score,
+                        "sentiment": r.sentiment_score,
+                        "rsi": r.rsi,
+                        "price": r.price,
+                    }
+                    for r in summary.top_sells
+                ],
+            })
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
     return app
 
 
