@@ -44,6 +44,15 @@ UNIVERSES = {
         "RIVN", "LCID", "RIOT", "MSTR", "AFRM", "UPST", "SOFI",
         "RBLX", "SNOW", "DKNG", "CRWD", "NET", "ROKU",
     ],
+    "MOST_ACTIVE": [
+        "SPY", "QQQ", "AAPL", "MSFT", "NVDA", "TSLA", "AMD", "AMZN",
+        "META", "GOOGL", "NFLX", "COIN", "MARA", "RIOT", "SOFI",
+        "PLTR", "INTC", "BAC", "F", "T", "PFE", "AAL", "NIO",
+        "SNAP", "UBER", "HOOD", "RBLX", "DKNG", "LCID", "RIVN",
+        "SMCI", "ARM", "MSTR", "CRWD", "NET", "ROKU", "SQ", "PYPL",
+        "DIS", "WMT", "JPM", "V", "MA", "XOM", "CVX", "JNJ",
+        "UNH", "HD", "PG", "KO",
+    ],
     "SP500_TOP50": [
         "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA",
         "BRK.B", "UNH", "JNJ", "XOM", "JPM", "V", "PG", "MA",
@@ -310,9 +319,15 @@ def main():
     )
     parser.add_argument(
         "--universe",
-        choices=list(UNIVERSES.keys()) + ["CUSTOM"],
-        default="DEFAULT",
-        help="Stock universe to scan (default: DEFAULT)",
+        choices=list(UNIVERSES.keys()) + ["CUSTOM", "ALL"],
+        default="MOST_ACTIVE",
+        help="Stock universe to scan (default: MOST_ACTIVE). Use ALL for all tradeable stocks.",
+    )
+    parser.add_argument(
+        "--max-symbols",
+        type=int,
+        default=500,
+        help="Max symbols to scan when using ALL universe (default: 500)",
     )
     parser.add_argument(
         "--symbols",
@@ -361,15 +376,22 @@ def main():
     )
 
     # Determine symbols to scan
+    client = AlpacaClient()
+
     if args.universe == "CUSTOM":
         if not args.symbols:
             print("Error: --symbols required when using --universe CUSTOM")
             return
         symbols = args.symbols
+    elif args.universe == "ALL":
+        print(f"🔎 Fetching all tradeable assets (max {args.max_symbols})...")
+        all_symbols = client.get_tradeable_assets()
+        symbols = all_symbols[:args.max_symbols]
+        print(f"   Found {len(all_symbols)} assets, scanning {len(symbols)}")
     else:
         symbols = UNIVERSES[args.universe]
 
-    scanner = MarketScanner(max_workers=args.workers)
+    scanner = MarketScanner(client=client, max_workers=args.workers)
 
     def run_scan():
         print(f"\n🔍 Scanning {len(symbols)} symbols from {args.universe} universe...\n")

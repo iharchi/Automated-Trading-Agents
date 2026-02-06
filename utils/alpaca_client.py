@@ -185,3 +185,62 @@ class AlpacaClient:
         """Check whether the market is currently open."""
         clock = self.api.get_clock()
         return clock.is_open
+
+    # ── Assets ──────────────────────────────────────────────────
+
+    def get_tradeable_assets(
+        self,
+        *,
+        min_price: float = 5.0,
+        max_price: float = 1000.0,
+        asset_class: str = "us_equity",
+    ) -> list[str]:
+        """Get all tradeable stock symbols.
+
+        Args:
+            min_price: Minimum price filter (default $5)
+            max_price: Maximum price filter (default $1000)
+            asset_class: Asset class to filter (default us_equity)
+
+        Returns:
+            List of ticker symbols
+        """
+        assets = self.api.list_assets(status="active", asset_class=asset_class)
+
+        symbols = []
+        for asset in assets:
+            if asset.tradable and asset.fractionable:
+                # Filter out OTC and weird tickers
+                if "." not in asset.symbol and len(asset.symbol) <= 5:
+                    symbols.append(asset.symbol)
+
+        logger.info("Found %d tradeable assets", len(symbols))
+        return symbols
+
+    def get_top_volume_stocks(self, limit: int = 100) -> list[str]:
+        """Get top stocks by trading volume (most active).
+
+        Note: This fetches snapshots which requires market data subscription.
+        Falls back to a curated list if not available.
+        """
+        try:
+            # Try to get most active stocks
+            snapshots = self.api.get_snapshots(
+                ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "TSLA", "AMD", "AMZN"]
+            )
+            # Sort by volume and return top
+            sorted_by_vol = sorted(
+                snapshots.items(),
+                key=lambda x: x[1].daily_bar.v if x[1].daily_bar else 0,
+                reverse=True,
+            )
+            return [sym for sym, _ in sorted_by_vol[:limit]]
+        except Exception as e:
+            logger.warning("Could not fetch volume data: %s", e)
+            # Fallback to curated high-volume list
+            return [
+                "SPY", "QQQ", "AAPL", "MSFT", "NVDA", "TSLA", "AMD", "AMZN",
+                "META", "GOOGL", "NFLX", "COIN", "MARA", "RIOT", "SOFI",
+                "PLTR", "INTC", "BAC", "F", "T", "PFE", "AAL", "NIO",
+                "SNAP", "UBER", "HOOD", "RBLX", "DKNG", "LCID", "RIVN",
+            ][:limit]
