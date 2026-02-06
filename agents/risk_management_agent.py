@@ -11,6 +11,9 @@ Checks performed:
     3. Per-trade risk budget via ATR-based stop-loss sizing
     4. Available buying power validation
     5. Stop-loss and take-profit price calculation
+    6. Daily loss limit check
+    7. Maximum drawdown check
+    8. Sector concentration check
 
 Typical flow:
     ta_analysis  = ta_agent.analyze("AAPL")
@@ -23,6 +26,8 @@ Typical flow:
 
 import logging
 from dataclasses import dataclass, field
+from datetime import date
+from typing import Optional
 
 from agents.base_agent import BaseAgent
 from utils.alpaca_client import AlpacaClient
@@ -37,6 +42,23 @@ MAX_PORTFOLIO_EXPOSURE = 1.50  # Allow up to 150 % exposure (margin)
 RISK_PER_TRADE_PCT = 0.02      # Risk at most 2 % of equity per trade
 ATR_STOP_MULTIPLIER = 1.5      # Stop-loss = entry - (ATR * multiplier)
 TAKE_PROFIT_RATIO = 2.0        # Take-profit at 2:1 reward-to-risk
+
+# New limits for smarter risk management
+DAILY_LOSS_LIMIT_PCT = 0.03    # Stop trading after 3% daily loss
+MAX_DRAWDOWN_PCT = 0.10        # Stop trading after 10% drawdown from peak
+MAX_SECTOR_CONCENTRATION = 0.35  # Max 35% in any single sector
+MAX_CORRELATED_POSITIONS = 3   # Max positions in highly correlated assets
+
+# Sector mappings (simplified - full version in portfolio_guardian_agent.py)
+SECTOR_MAP = {
+    "AAPL": "Technology", "MSFT": "Technology", "GOOGL": "Technology",
+    "NVDA": "Technology", "AMD": "Technology", "META": "Technology",
+    "AMZN": "Consumer", "TSLA": "Consumer", "RIVN": "Consumer",
+    "JPM": "Financials", "BAC": "Financials", "GS": "Financials",
+    "COIN": "Crypto", "MARA": "Crypto", "RIOT": "Crypto", "MSTR": "Crypto",
+    "XOM": "Energy", "CVX": "Energy", "COP": "Energy",
+    "JNJ": "Healthcare", "PFE": "Healthcare", "UNH": "Healthcare",
+}
 
 
 @dataclass
@@ -62,6 +84,10 @@ class RiskResult:
     risk_amount: float = 0.0
     current_exposure_pct: float = 0.0
     current_position_pct: float = 0.0
+    daily_pnl_pct: float = 0.0
+    drawdown_pct: float = 0.0
+    sector: str = ""
+    sector_exposure_pct: float = 0.0
 
 
 class RiskManagementAgent(BaseAgent):
@@ -76,6 +102,9 @@ class RiskManagementAgent(BaseAgent):
         risk_per_trade_pct: float = RISK_PER_TRADE_PCT,
         atr_stop_multiplier: float = ATR_STOP_MULTIPLIER,
         take_profit_ratio: float = TAKE_PROFIT_RATIO,
+        daily_loss_limit_pct: float = DAILY_LOSS_LIMIT_PCT,
+        max_drawdown_pct: float = MAX_DRAWDOWN_PCT,
+        max_sector_concentration: float = MAX_SECTOR_CONCENTRATION,
         auto_trade: bool = False,
     ):
         super().__init__(name="RiskManagement", client=client)
@@ -84,7 +113,49 @@ class RiskManagementAgent(BaseAgent):
         self.risk_per_trade_pct = risk_per_trade_pct
         self.atr_stop_multiplier = atr_stop_multiplier
         self.take_profit_ratio = take_profit_ratio
+        self.daily_loss_limit_pct = daily_loss_limit_pct
+        self.max_drawdown_pct = max_drawdown_pct
+        self.max_sector_concentration = max_sector_concentration
         self.auto_trade = auto_trade
+
+        # Daily tracking state
+        self._day_start_equity: float = 0.0
+        self._peak_equity: float = 0.0
+        self._current_date: date = date.today()
+
+    # ── Daily/Drawdown Tracking ───────────────────────────────
+
+    def _update_tracking(self, equity: float) -> tuple[float, float]:
+        """Update daily and drawdown tracking. Returns (daily_pnl_pct, drawdown_pct)."""
+        today = date.today()
+
+        # Reset on new day
+        if today != self._current_date:
+            self._current_date = today
+            self._day_start_equity = equity
+            logger.info("New trading day - reset daily tracking. Start equity: $%.2f", equity)
+
+        # Initialize on first call
+        if self._day_start_equity == 0:
+            self._day_start_equity = equity
+
+        if self._peak_equity == 0:
+            self._peak_equity = equity
+
+        # Update peak
+        if equity > self._peak_equity:
+            self._peak_equity = equity
+
+        # Calculate metrics
+        daily_pnl_pct = (equity - self._day_start_equity) / self._day_start_equity if self._day_start_equity > 0 else 0
+        drawdown_pct = (self._peak_equity - equity) / self._peak_equity if self._peak_equity > 0 else 0
+
+        return daily_pnl_pct, drawdown_pct
+
+    @staticmethod
+    def get_sector(symbol: str) -> str:
+        """Get sector for a symbol."""
+        return SECTOR_MAP.get(symbol.upper(), "Other")
 
     # ── Portfolio helpers ────────────────────────────────────
 
@@ -222,6 +293,69 @@ class RiskManagementAgent(BaseAgent):
             detail=f"Holding {qty} shares of {symbol}",
         )
 
+    def _check_daily_loss_limit(self, daily_pnl_pct: float) -> RiskCheck:
+        """Check if daily loss limit has been breached."""
+        limit = self.daily_loss_limit_pct
+        breached = daily_pnl_pct <= -limit
+
+        if breached:
+            return RiskCheck(
+                rule="daily_loss_limit",
+                passed=False,
+                detail=f"Daily loss {daily_pnl_pct:.2%} exceeds limit {-limit:.2%}",
+            )
+        return RiskCheck(
+            rule="daily_loss_limit",
+            passed=True,
+            detail=f"Daily P&L {daily_pnl_pct:+.2%} within limit {-limit:.2%}",
+        )
+
+    def _check_max_drawdown(self, drawdown_pct: float) -> RiskCheck:
+        """Check if maximum drawdown has been breached."""
+        limit = self.max_drawdown_pct
+        breached = drawdown_pct >= limit
+
+        if breached:
+            return RiskCheck(
+                rule="max_drawdown",
+                passed=False,
+                detail=f"Drawdown {drawdown_pct:.2%} exceeds limit {limit:.2%}",
+            )
+        return RiskCheck(
+            rule="max_drawdown",
+            passed=True,
+            detail=f"Drawdown {drawdown_pct:.2%} within limit {limit:.2%}",
+        )
+
+    def _check_sector_concentration(
+        self, symbol: str, positions: dict, equity: float, new_trade_value: float
+    ) -> RiskCheck:
+        """Check if adding this position would over-concentrate a sector."""
+        sector = self.get_sector(symbol)
+        limit = self.max_sector_concentration
+
+        # Calculate current sector exposure
+        sector_value = 0.0
+        for sym, pos in positions.items():
+            if self.get_sector(sym) == sector:
+                sector_value += abs(pos.get("market_value", 0))
+
+        # Add new trade value
+        new_sector_value = sector_value + new_trade_value
+        new_sector_pct = new_sector_value / equity if equity > 0 else 0
+
+        if new_sector_pct > limit:
+            return RiskCheck(
+                rule="sector_concentration",
+                passed=False,
+                detail=f"Sector {sector} would be {new_sector_pct:.1%} (limit {limit:.0%})",
+            )
+        return RiskCheck(
+            rule="sector_concentration",
+            passed=True,
+            detail=f"Sector {sector} at {new_sector_pct:.1%} (limit {limit:.0%})",
+        )
+
     # ── Core lifecycle ───────────────────────────────────────
 
     def analyze(self, symbol: str, **kwargs) -> dict:
@@ -231,18 +365,30 @@ class RiskManagementAgent(BaseAgent):
             proposed_side: "buy" or "sell"
             price: current share price
             atr: Average True Range (from TA agent)
+
+        Optional kwargs:
+            skip_daily_checks: bool - Skip daily loss/drawdown checks (default False)
         """
         proposed_side = kwargs.get("proposed_side", "buy")
         price = float(kwargs.get("price", 0))
         atr = float(kwargs.get("atr", 0))
+        skip_daily_checks = kwargs.get("skip_daily_checks", False)
 
         snapshot = self._get_portfolio_snapshot()
         equity = snapshot["equity"]
+
+        # Update daily and drawdown tracking
+        daily_pnl_pct, drawdown_pct = self._update_tracking(equity)
 
         existing_pos = snapshot["positions"].get(symbol, {})
         existing_value = abs(existing_pos.get("market_value", 0))
 
         checks: list[RiskCheck] = []
+
+        # Always check daily loss and drawdown limits first (unless skipped)
+        if not skip_daily_checks:
+            checks.append(self._check_daily_loss_limit(daily_pnl_pct))
+            checks.append(self._check_max_drawdown(drawdown_pct))
 
         if proposed_side == "buy":
             shares, stop_loss, risk_amount = self._calculate_position_size(
@@ -267,6 +413,12 @@ class RiskManagementAgent(BaseAgent):
             checks.append(
                 self._check_buying_power(snapshot["buying_power"], price, shares)
             )
+            # Check sector concentration
+            checks.append(
+                self._check_sector_concentration(
+                    symbol, snapshot["positions"], equity, trade_value
+                )
+            )
         else:
             # Sell: just verify we hold the position
             shares = existing_pos.get("qty", 0)
@@ -278,6 +430,15 @@ class RiskManagementAgent(BaseAgent):
             )
 
         approved = all(c.passed for c in checks) and shares > 0
+
+        # Get sector info
+        sector = self.get_sector(symbol)
+        sector_value = sum(
+            abs(pos.get("market_value", 0))
+            for sym, pos in snapshot["positions"].items()
+            if self.get_sector(sym) == sector
+        )
+        sector_exposure_pct = sector_value / equity if equity > 0 else 0
 
         result = RiskResult(
             symbol=symbol,
@@ -292,6 +453,10 @@ class RiskManagementAgent(BaseAgent):
             current_position_pct=round(
                 existing_value / equity if equity else 0, 4
             ),
+            daily_pnl_pct=round(daily_pnl_pct, 4),
+            drawdown_pct=round(drawdown_pct, 4),
+            sector=sector,
+            sector_exposure_pct=round(sector_exposure_pct, 4),
         )
         return result.__dict__
 
@@ -328,16 +493,28 @@ class RiskManagementAgent(BaseAgent):
             f"  Portfolio exposure: {analysis['current_exposure_pct']:.1%}  |  "
             f"Position in {analysis['symbol']}: "
             f"{analysis['current_position_pct']:.1%}",
-            f"{'=' * 60}",
         ]
+
+        # Add new metrics if available
+        if "daily_pnl_pct" in analysis:
+            lines.append(
+                f"  Daily P&L: {analysis['daily_pnl_pct']:+.2%}  |  "
+                f"Drawdown: {analysis['drawdown_pct']:.2%}"
+            )
+        if "sector" in analysis:
+            lines.append(
+                f"  Sector: {analysis['sector']} ({analysis['sector_exposure_pct']:.1%} exposure)"
+            )
+
+        lines.append(f"{'=' * 60}")
 
         for chk in analysis.get("checks", []):
             if isinstance(chk, dict):
                 icon = "PASS" if chk["passed"] else "FAIL"
-                lines.append(f"  [{icon}] {chk['rule']:18s}  {chk['detail']}")
+                lines.append(f"  [{icon}] {chk['rule']:20s}  {chk['detail']}")
             else:
                 icon = "PASS" if chk.passed else "FAIL"
-                lines.append(f"  [{icon}] {chk.rule:18s}  {chk.detail}")
+                lines.append(f"  [{icon}] {chk.rule:20s}  {chk.detail}")
 
         lines.append(f"{'─' * 60}")
 

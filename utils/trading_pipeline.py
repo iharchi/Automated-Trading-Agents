@@ -40,6 +40,8 @@ from agents.sentiment_analysis_agent import SentimentAnalysisAgent
 from agents.risk_management_agent import RiskManagementAgent
 from agents.execution_agent import ExecutionAgent
 from agents.scanner_agent import ScannerAgent
+from agents.portfolio_guardian_agent import PortfolioGuardianAgent
+from utils.profit_monitor import ProfitMonitor
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +114,8 @@ class TradingPipeline:
         ta_agent: TechnicalAnalysisAgent | None = None,
         sentiment_agent: SentimentAnalysisAgent | None = None,
         scanner_agent: ScannerAgent | None = None,
+        guardian_agent: PortfolioGuardianAgent | None = None,
+        profit_monitor: ProfitMonitor | None = None,
         # Feature toggles
         enable_regime: bool = True,
         enable_correlation: bool = True,
@@ -119,6 +123,12 @@ class TradingPipeline:
         enable_events: bool = True,
         enable_journal: bool = True,
         enable_notifications: bool = True,
+        enable_guardian: bool = True,
+        # Profit protection settings
+        take_profit_pct: float = 0.10,  # 10% profit target
+        trailing_stop_pct: float = 0.05,  # 5% trailing stop
+        daily_loss_limit_pct: float = 0.03,  # 3% daily loss limit
+        max_drawdown_pct: float = 0.10,  # 10% max drawdown
     ):
         self.client = client
         self.dry_run = dry_run
@@ -137,6 +147,8 @@ class TradingPipeline:
         self.ta_agent = ta_agent
         self.sentiment_agent = sentiment_agent
         self.scanner_agent = scanner_agent
+        self.guardian_agent = guardian_agent
+        self.profit_monitor = profit_monitor
 
         # Toggles
         self.enable_regime = enable_regime
@@ -145,6 +157,13 @@ class TradingPipeline:
         self.enable_events = enable_events
         self.enable_journal = enable_journal
         self.enable_notifications = enable_notifications
+        self.enable_guardian = enable_guardian
+
+        # Profit protection settings
+        self.take_profit_pct = take_profit_pct
+        self.trailing_stop_pct = trailing_stop_pct
+        self.daily_loss_limit_pct = daily_loss_limit_pct
+        self.max_drawdown_pct = max_drawdown_pct
 
     # ── Lazy component init ───────────────────────────────────────
 
@@ -186,6 +205,24 @@ class TradingPipeline:
                 client=self.client,
                 auto_trade=False,  # Pipeline handles execution
                 dry_run=self.dry_run,
+            )
+        if self.enable_guardian and self.guardian_agent is None:
+            self.guardian_agent = PortfolioGuardianAgent(
+                client=self.client,
+                take_profit_pct=self.take_profit_pct,
+                trailing_stop_pct=self.trailing_stop_pct,
+                daily_loss_limit_pct=self.daily_loss_limit_pct,
+                max_drawdown_pct=self.max_drawdown_pct,
+                auto_trade=not self.dry_run,  # Auto-close positions in live mode
+                dry_run=self.dry_run,
+            )
+        if self.profit_monitor is None:
+            self.profit_monitor = ProfitMonitor(
+                client=self.client,
+                take_profit_pct=self.take_profit_pct,
+                trailing_stop_pct=self.trailing_stop_pct,
+                daily_loss_limit_pct=self.daily_loss_limit_pct,
+                max_drawdown_pct=self.max_drawdown_pct,
             )
 
     # ── Event helpers ─────────────────────────────────────────────
@@ -461,6 +498,80 @@ class TradingPipeline:
             logger.warning("Trailing stop registration failed for %s: %s", symbol, e)
             return PipelineStep(name="trailing_stop", detail=f"error: {e}")
 
+    # ── Guardian checks ──────────────────────────────────────────
+
+    def _step_guardian_check(self) -> tuple[PipelineStep, bool, str]:
+        """Check if trading should be halted based on guardian rules."""
+        if not self.enable_guardian or self.guardian_agent is None:
+            return PipelineStep(name="guardian", detail="skipped (disabled)"), False, ""
+
+        try:
+            should_halt, halt_reason = self.profit_monitor.should_halt_trading()
+            if should_halt:
+                self._emit(
+                    "trading_halted",
+                    {"reason": halt_reason},
+                    source="PortfolioGuardian",
+                )
+                return PipelineStep(
+                    name="guardian",
+                    passed=False,
+                    detail=f"TRADING HALTED: {halt_reason}",
+                ), True, halt_reason
+
+            # Get portfolio metrics for logging
+            metrics = self.profit_monitor.get_portfolio_metrics()
+            return PipelineStep(
+                name="guardian",
+                detail=f"OK - Daily P&L: {metrics.daily_pnl_pct:+.2%}, Drawdown: {metrics.current_drawdown_pct:.2%}",
+                data={"daily_pnl_pct": metrics.daily_pnl_pct, "drawdown_pct": metrics.current_drawdown_pct},
+            ), False, ""
+
+        except Exception as e:
+            logger.warning("Guardian check failed: %s", e)
+            return PipelineStep(name="guardian", detail=f"error: {e}"), False, ""
+
+    def _step_close_profit_targets(self) -> tuple[PipelineStep, list[dict]]:
+        """Close positions that hit profit targets or trailing stops."""
+        if not self.enable_guardian or self.guardian_agent is None:
+            return PipelineStep(name="profit_protection", detail="skipped (disabled)"), []
+
+        try:
+            positions_to_close = self.profit_monitor.get_positions_to_close()
+            if not positions_to_close:
+                return PipelineStep(
+                    name="profit_protection",
+                    detail="No positions at targets",
+                ), []
+
+            # Execute closes
+            analysis = self.guardian_agent.analyze()
+            results = self.guardian_agent.execute(analysis=analysis)
+            actions = results.get("actions_taken", [])
+
+            # Emit events for closed positions
+            for action in actions:
+                self._emit(
+                    "position_closed",
+                    {
+                        "symbol": action["symbol"],
+                        "reason": action["reason"],
+                        "status": action["status"],
+                    },
+                    symbol=action["symbol"],
+                    source="PortfolioGuardian",
+                )
+
+            return PipelineStep(
+                name="profit_protection",
+                detail=f"Closed {len(actions)} positions",
+                data={"closed": actions},
+            ), actions
+
+        except Exception as e:
+            logger.error("Profit protection step failed: %s", e)
+            return PipelineStep(name="profit_protection", passed=False, detail=str(e)), []
+
     # ── Main run ──────────────────────────────────────────────────
 
     def run(
@@ -475,6 +586,19 @@ class TradingPipeline:
         """
         self._ensure_components()
         results: list[PipelineResult] = []
+
+        # Step 0: Guardian check - should we halt trading?
+        guardian_step, trading_halted, halt_reason = self._step_guardian_check()
+        if trading_halted:
+            logger.warning("TRADING HALTED: %s", halt_reason)
+            for symbol in symbols:
+                r = PipelineResult(symbol=symbol, error=f"Trading halted: {halt_reason}")
+                r.steps.append(guardian_step)
+                results.append(r)
+            return results
+
+        # Step 0b: Close positions at profit targets/stops
+        profit_step, closed_positions = self._step_close_profit_targets()
 
         # Step 1: Market regime (once for all symbols)
         regime_step, regime_result = self._step_regime(timeframe)
@@ -509,6 +633,8 @@ class TradingPipeline:
 
         for symbol in symbols:
             result = PipelineResult(symbol=symbol)
+            result.steps.append(guardian_step)
+            result.steps.append(profit_step)
             result.steps.append(regime_step)
             result.regime = regime_result.get("regime", "") if regime_result else ""
 
