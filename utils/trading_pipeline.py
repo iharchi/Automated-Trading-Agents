@@ -380,7 +380,7 @@ class TradingPipeline:
             risk_result = self.risk_agent.analyze(
                 symbol,
                 proposed_side=side,
-                proposed_price=price,
+                price=price,  # Risk agent expects 'price', not 'proposed_price'
                 atr=atr,
             )
             approved = risk_result.get("approved", False)
