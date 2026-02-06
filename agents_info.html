@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trading Agents - System Overview</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #e0e0e0;
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 50px;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            color: #00d4ff;
+            margin-bottom: 10px;
+            text-shadow: 0 0 20px rgba(0, 212, 255, 0.3);
+        }
+
+        .subtitle {
+            color: #888;
+            font-size: 1.1rem;
+        }
+
+        .section {
+            margin-bottom: 50px;
+        }
+
+        .section-title {
+            font-size: 1.5rem;
+            color: #00d4ff;
+            margin-bottom: 25px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #00d4ff33;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .section-icon {
+            font-size: 1.8rem;
+        }
+
+        .agents-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 25px;
+        }
+
+        .agent-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            padding: 25px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+
+        .agent-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 40px rgba(0, 212, 255, 0.2);
+            border-color: rgba(0, 212, 255, 0.3);
+        }
+
+        .agent-header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
+        .agent-icon {
+            width: 50px;
+            height: 50px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+        }
+
+        .icon-analysis { background: linear-gradient(135deg, #667eea, #764ba2); }
+        .icon-sentiment { background: linear-gradient(135deg, #f093fb, #f5576c); }
+        .icon-mean { background: linear-gradient(135deg, #4facfe, #00f2fe); }
+        .icon-mtf { background: linear-gradient(135deg, #43e97b, #38f9d7); }
+        .icon-risk { background: linear-gradient(135deg, #fa709a, #fee140); }
+        .icon-portfolio { background: linear-gradient(135deg, #a18cd1, #fbc2eb); }
+        .icon-execution { background: linear-gradient(135deg, #ff9a9e, #fecfef); }
+        .icon-aggregator { background: linear-gradient(135deg, #667eea, #764ba2); }
+        .icon-sizer { background: linear-gradient(135deg, #f093fb, #f5576c); }
+        .icon-regime { background: linear-gradient(135deg, #4facfe, #00f2fe); }
+        .icon-correlation { background: linear-gradient(135deg, #43e97b, #38f9d7); }
+        .icon-trailing { background: linear-gradient(135deg, #fa709a, #fee140); }
+        .icon-pipeline { background: linear-gradient(135deg, #a18cd1, #fbc2eb); }
+
+        .agent-name {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #fff;
+        }
+
+        .agent-file {
+            font-size: 0.8rem;
+            color: #00d4ff;
+            font-family: 'Monaco', 'Consolas', monospace;
+            background: rgba(0, 212, 255, 0.1);
+            padding: 2px 8px;
+            border-radius: 4px;
+            margin-top: 5px;
+            display: inline-block;
+        }
+
+        .agent-description {
+            color: #b0b0b0;
+            line-height: 1.6;
+            margin-bottom: 15px;
+        }
+
+        .agent-features {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .feature-tag {
+            background: rgba(0, 212, 255, 0.15);
+            color: #00d4ff;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+        }
+
+        .flow-section {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            padding: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .flow-diagram {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+            padding: 20px;
+        }
+
+        .flow-step {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            padding: 15px 30px;
+            border-radius: 10px;
+            font-weight: 500;
+            text-align: center;
+            min-width: 280px;
+        }
+
+        .flow-arrow {
+            color: #00d4ff;
+            font-size: 1.5rem;
+        }
+
+        .flow-step.regime { background: linear-gradient(135deg, #4facfe, #00f2fe); }
+        .flow-step.analysis { background: linear-gradient(135deg, #667eea, #764ba2); }
+        .flow-step.aggregate { background: linear-gradient(135deg, #43e97b, #38f9d7); color: #1a1a2e; }
+        .flow-step.size { background: linear-gradient(135deg, #f093fb, #f5576c); }
+        .flow-step.risk { background: linear-gradient(135deg, #fa709a, #fee140); color: #1a1a2e; }
+        .flow-step.execute { background: linear-gradient(135deg, #ff9a9e, #fecfef); color: #1a1a2e; }
+        .flow-step.monitor { background: linear-gradient(135deg, #a18cd1, #fbc2eb); color: #1a1a2e; }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-top: 40px;
+        }
+
+        .stat-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #00d4ff;
+        }
+
+        .stat-label {
+            color: #888;
+            margin-top: 5px;
+        }
+
+        footer {
+            text-align: center;
+            margin-top: 50px;
+            padding-top: 30px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            color: #666;
+        }
+
+        .back-link {
+            display: inline-block;
+            margin-top: 20px;
+            color: #00d4ff;
+            text-decoration: none;
+            padding: 10px 20px;
+            border: 1px solid #00d4ff;
+            border-radius: 8px;
+            transition: all 0.3s;
+        }
+
+        .back-link:hover {
+            background: #00d4ff;
+            color: #1a1a2e;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Automated Trading Agents</h1>
+            <p class="subtitle">Multi-Agent Algorithmic Trading System</p>
+        </header>
+
+        <!-- Core Analysis Agents -->
+        <section class="section">
+            <h2 class="section-title">
+                <span class="section-icon">📊</span>
+                Core Analysis Agents
+            </h2>
+            <div class="agents-grid">
+                <div class="agent-card">
+                    <div class="agent-header">
+                        <div class="agent-icon icon-analysis">📈</div>
+                        <div>
+                            <div class="agent-name">Technical Analysis Agent</div>
+                            <div class="agent-file">agents/technical_analysis_agent.py</div>
+                        </div>
+                    </div>
+                    <p class="agent-description">
+                        Computes 6 technical indicators and generates composite BUY/SELL/HOLD signals.
+                        Each indicator votes +1 (bullish), -1 (bearish), or 0 (neutral). The composite
+                        score determines the final signal.
+                    </p>
+                    <div class="agent-features">
+                        <span class="feature-tag">RSI (14)</span>
+                        <span class="feature-tag">MACD</span>
+                        <span class="feature-tag">Bollinger Bands</span>
+                        <span class="feature-tag">EMA Crossover</span>
+                        <span class="feature-tag">Stochastic</span>
+                        <span class="feature-tag">ADX</span>
+                    </div>
+                </div>
+
+                <div class="agent-card">
+                    <div class="agent-header">
+                        <div class="agent-icon icon-sentiment">💬</div>
+                        <div>
+                            <div class="agent-name">Sentiment Analysis Agent</div>
+                            <div class="agent-file">agents/sentiment_analysis_agent.py</div>
+                        </div>
+                    </div>
+                    <p class="agent-description">
+                        Fetches recent news headlines from Alpaca's news API and analyzes sentiment
+                        using VADER. Scores range from -1 (bearish) to +1 (bullish). Helps confirm
+                        or contradict technical signals.
+                    </p>
+                    <div class="agent-features">
+                        <span class="feature-tag">News API</span>
+                        <span class="feature-tag">VADER Sentiment</span>
+                        <span class="feature-tag">Headline Analysis</span>
+                    </div>
+                </div>
+
+                <div class="agent-card">
+                    <div class="agent-header">
+                        <div class="agent-icon icon-mean">🔄</div>
+                        <div>
+                            <div class="agent-name">Mean Reversion Agent</div>
+                            <div class="agent-file">agents/mean_reversion_agent.py</div>
+                        </div>
+                    </div>
+                    <p class="agent-description">
+                        Detects oversold/overbought conditions where price deviates significantly
+                        from its mean. Best suited for ranging/sideways markets. Uses statistical
+                        Z-score to measure deviation.
+                    </p>
+                    <div class="agent-features">
+                        <span class="feature-tag">Bollinger Bands</span>
+                        <span class="feature-tag">RSI Extreme</span>
+                        <span class="feature-tag">Z-Score</span>
+                        <span class="feature-tag">Stochastic</span>
+                    </div>
+                </div>
+
+                <div class="agent-card">
+                    <div class="agent-header">
+                        <div class="agent-icon icon-mtf">⏱️</div>
+                        <div>
+                            <div class="agent-name">Multi-Timeframe Agent</div>
+                            <div class="agent-file">agents/multi_timeframe_agent.py</div>
+                        </div>
+                    </div>
+                    <p class="agent-description">
+                        Analyzes price action across multiple timeframes to confirm signals.
+                        A signal is stronger when multiple timeframes agree. Prevents false
+                        signals from short-term noise.
+                    </p>
+                    <div class="agent-features">
+                        <span class="feature-tag">1 Minute</span>
+                        <span class="feature-tag">5 Minutes</span>
+                        <span class="feature-tag">1 Hour</span>
+                        <span class="feature-tag">1 Day</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Decision & Risk Agents -->
+        <section class="section">
+            <h2 class="section-title">
+                <span class="section-icon">🛡️</span>
+                Decision & Risk Agents
+            </h2>
+            <div class="agents-grid">
+                <div class="agent-card">
+                    <div class="agent-header">
+                        <div class="agent-icon icon-risk">⚠️</div>
+                        <div>
+                            <div class="agent-name">Risk Management Agent</div>
+                            <div class="agent-file">agents/risk_management_agent.py</div>
+                        </div>
+                    </div>
+                    <p class="agent-description">
+                        Enforces strict risk controls before any trade executes. Checks position
+                        concentration limits, portfolio exposure, and buying power. Rejects trades
+                        that exceed risk parameters.
+                    </p>
+                    <div class="agent-features">
+                        <span class="feature-tag">Position Limits</span>
+                        <span class="feature-tag">Exposure Caps</span>
+                        <span class="feature-tag">Buying Power</span>
+                    </div>
+                </div>
+
+                <div class="agent-card">
+                    <div class="agent-header">
+                        <div class="agent-icon icon-portfolio">📋</div>
+                        <div>
+                            <div class="agent-name">Portfolio Manager Agent</div>
+                            <div class="agent-file">agents/portfolio_manager_agent.py</div>
+                        </div>
+                    </div>
+                    <p class="agent-description">
+                        Coordinates all analysis agents and makes final trade decisions. Weighs
+                        signals from different sources and determines optimal position sizing
+                        based on portfolio state.
+                    </p>
+                    <div class="agent-features">
+                        <span class="feature-tag">Signal Coordination</span>
+                        <span class="feature-tag">Decision Making</span>
+                        <span class="feature-tag">Position Management</span>
+                    </div>
+                </div>
+
+                <div class="agent-card">
+                    <div class="agent-header">
+                        <div class="agent-icon icon-execution">🚀</div>
+                        <div>
+                            <div class="agent-name">Execution Agent</div>
+                            <div class="agent-file">agents/execution_agent.py</div>
+                        </div>
+                    </div>
+                    <p class="agent-description">
+                        Places orders via Alpaca API with retry logic for reliability. Handles
+                        order submission, fill verification, and error recovery. Supports market
+                        and bracket orders.
+                    </p>
+                    <div class="agent-features">
+                        <span class="feature-tag">Order Placement</span>
+                        <span class="feature-tag">Retry Logic</span>
+                        <span class="feature-tag">Fill Verification</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Supporting Components -->
+        <section class="section">
+            <h2 class="section-title">
+                <span class="section-icon">⚙️</span>
+                Supporting Components
+            </h2>
+            <div class="agents-grid">
+                <div class="agent-card">
+                    <div class="agent-header">
+                        <div class="agent-icon icon-aggregator">🔗</div>
+                        <div>
+                            <div class="agent-name">Signal Aggregator</div>
+                            <div class="agent-file">utils/signal_aggregator.py</div>
+                        </div>
+                    </div>
+                    <p class="agent-description">
+                        Combines signals from TA, Sentiment, and MTF agents with configurable
+                        weights. Produces a unified score and confidence level for trade decisions.
+                    </p>
+                    <div class="agent-features">
+                        <span class="feature-tag">Weighted Scoring</span>
+                        <span class="feature-tag">Confidence Calc</span>
+                    </div>
+                </div>
+
+                <div class="agent-card">
+                    <div class="agent-header">
+                        <div class="agent-icon icon-sizer">📐</div>
+                        <div>
+                            <div class="agent-name">Position Sizer</div>
+                            <div class="agent-file">utils/position_sizer.py</div>
+                        </div>
+                    </div>
+                    <p class="agent-description">
+                        Uses Kelly Criterion to calculate optimal position size based on win rate,
+                        payoff ratio, and volatility. Prevents over-betting while maximizing growth.
+                    </p>
+                    <div class="agent-features">
+                        <span class="feature-tag">Kelly Criterion</span>
+                        <span class="feature-tag">Risk-Adjusted</span>
+                    </div>
+                </div>
+
+                <div class="agent-card">
+                    <div class="agent-header">
+                        <div class="agent-icon icon-regime">🌡️</div>
+                        <div>
+                            <div class="agent-name">Market Regime Detector</div>
+                            <div class="agent-file">utils/market_regime.py</div>
+                        </div>
+                    </div>
+                    <p class="agent-description">
+                        Classifies current market conditions into regimes: TRENDING_UP,
+                        TRENDING_DOWN, RANGING, VOLATILE, or BREAKOUT. Adjusts strategy weights
+                        based on regime.
+                    </p>
+                    <div class="agent-features">
+                        <span class="feature-tag">Trend Detection</span>
+                        <span class="feature-tag">Volatility Analysis</span>
+                    </div>
+                </div>
+
+                <div class="agent-card">
+                    <div class="agent-header">
+                        <div class="agent-icon icon-correlation">🔀</div>
+                        <div>
+                            <div class="agent-name">Correlation Filter</div>
+                            <div class="agent-file">utils/correlation_filter.py</div>
+                        </div>
+                    </div>
+                    <p class="agent-description">
+                        Prevents buying stocks that are too correlated with existing positions.
+                        Ensures portfolio diversification and reduces concentrated risk.
+                    </p>
+                    <div class="agent-features">
+                        <span class="feature-tag">Correlation Check</span>
+                        <span class="feature-tag">Diversification</span>
+                    </div>
+                </div>
+
+                <div class="agent-card">
+                    <div class="agent-header">
+                        <div class="agent-icon icon-trailing">📉</div>
+                        <div>
+                            <div class="agent-name">Trailing Stop Manager</div>
+                            <div class="agent-file">utils/trailing_stop_manager.py</div>
+                        </div>
+                    </div>
+                    <p class="agent-description">
+                        Monitors open positions and adjusts stop-loss levels as price moves
+                        favorably. Locks in profits while allowing winners to run.
+                    </p>
+                    <div class="agent-features">
+                        <span class="feature-tag">Dynamic Stops</span>
+                        <span class="feature-tag">Profit Protection</span>
+                    </div>
+                </div>
+
+                <div class="agent-card">
+                    <div class="agent-header">
+                        <div class="agent-icon icon-pipeline">🔄</div>
+                        <div>
+                            <div class="agent-name">Trading Pipeline</div>
+                            <div class="agent-file">utils/trading_pipeline.py</div>
+                        </div>
+                    </div>
+                    <p class="agent-description">
+                        Orchestrates the entire trading flow from market regime detection through
+                        execution. Chains all components together for end-to-end automation.
+                    </p>
+                    <div class="agent-features">
+                        <span class="feature-tag">Orchestration</span>
+                        <span class="feature-tag">End-to-End</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Pipeline Flow -->
+        <section class="section">
+            <h2 class="section-title">
+                <span class="section-icon">🔄</span>
+                Trading Pipeline Flow
+            </h2>
+            <div class="flow-section">
+                <div class="flow-diagram">
+                    <div class="flow-step regime">1. Market Regime Detector → "TRENDING_DOWN"</div>
+                    <div class="flow-arrow">↓</div>
+                    <div class="flow-step analysis">2. Technical Analysis → score: +2 (BUY)</div>
+                    <div class="flow-arrow">↓</div>
+                    <div class="flow-step analysis">3. Sentiment Analysis → score: +0.02 (HOLD)</div>
+                    <div class="flow-arrow">↓</div>
+                    <div class="flow-step aggregate">4. Signal Aggregator → combined: +0.16 → BUY</div>
+                    <div class="flow-arrow">↓</div>
+                    <div class="flow-step size">5. Position Sizer → 32 shares (Kelly: 16.7%)</div>
+                    <div class="flow-arrow">↓</div>
+                    <div class="flow-step risk">6. Risk Management → approved: ✓</div>
+                    <div class="flow-arrow">↓</div>
+                    <div class="flow-step execute">7. Execution Agent → ORDER PLACED</div>
+                    <div class="flow-arrow">↓</div>
+                    <div class="flow-step monitor">8. Trailing Stop Manager → monitoring...</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Stats -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value">7</div>
+                <div class="stat-label">Core Agents</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">6</div>
+                <div class="stat-label">Supporting Components</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">6</div>
+                <div class="stat-label">Technical Indicators</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">882</div>
+                <div class="stat-label">Tests Passing</div>
+            </div>
+        </div>
+
+        <footer>
+            <p>Automated Trading Agents &copy; 2024</p>
+            <a href="http://127.0.0.1:8080" class="back-link">← Back to Dashboard</a>
+        </footer>
+    </div>
+</body>
+</html>

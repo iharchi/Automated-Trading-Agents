@@ -302,13 +302,16 @@ def create_app(dashboard_data: DashboardData | None = None):
     Returns None if Flask is not installed.
     """
     try:
-        from flask import Flask, jsonify
+        from flask import Flask, jsonify, send_file
     except ImportError:
         logger.warning("Flask not installed. Run: pip install flask")
         return None
 
     app = Flask(__name__)
     data = dashboard_data or DashboardData()
+
+    # Path to agents info page
+    agents_info_path = Path(__file__).parent / "agents_info.html"
 
     @app.route("/")
     def index():
@@ -337,6 +340,12 @@ def create_app(dashboard_data: DashboardData | None = None):
     @app.route("/api/decisions")
     def api_decisions():
         return jsonify(data.get_decisions())
+
+    @app.route("/agents")
+    def agents_page():
+        if agents_info_path.exists():
+            return send_file(agents_info_path)
+        return "Agents info page not found", 404
 
     return app
 
