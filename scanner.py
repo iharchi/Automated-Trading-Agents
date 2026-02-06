@@ -26,6 +26,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from utils.alpaca_client import AlpacaClient
 from utils.market_regime import MarketRegimeDetector
+from utils.trading_pipeline import TradingPipeline
 from agents.technical_analysis_agent import TechnicalAnalysisAgent
 from agents.sentiment_analysis_agent import SentimentAnalysisAgent
 
@@ -114,12 +115,15 @@ class MarketScanner:
         client: AlpacaClient | None = None,
         *,
         max_workers: int = 5,
+        dry_run: bool = True,
     ):
         self.client = client or AlpacaClient()
         self.max_workers = max_workers
+        self.dry_run = dry_run
         self.ta_agent = TechnicalAnalysisAgent(client=self.client)
         self.sentiment_agent = SentimentAnalysisAgent(client=self.client)
         self.regime_detector = MarketRegimeDetector(client=self.client)
+        self.pipeline = TradingPipeline(client=self.client, dry_run=dry_run)
 
     def _scan_symbol(self, symbol: str) -> ScanResult:
         """Scan a single symbol."""
@@ -309,6 +313,90 @@ class MarketScanner:
 
         return "\n".join(lines)
 
+    def execute_signals(
+        self,
+        summary: ScanSummary,
+        *,
+        max_trades: int = 3,
+        min_score: float = 0.0,
+    ) -> list:
+        """Execute trades based on scan results.
+
+        Args:
+            summary: ScanSummary from a previous scan
+            max_trades: Maximum number of trades to execute per scan
+            min_score: Minimum combined score to execute
+
+        Returns:
+            List of PipelineResult from executed trades
+        """
+        # Get symbols with actionable signals
+        buy_symbols = [
+            r.symbol for r in summary.top_buys
+            if abs(r.combined_score) >= min_score
+        ][:max_trades]
+
+        sell_symbols = [
+            r.symbol for r in summary.top_sells
+            if abs(r.combined_score) >= min_score
+        ][:max_trades]
+
+        all_symbols = buy_symbols + sell_symbols
+
+        if not all_symbols:
+            logger.info("No symbols meet criteria for execution")
+            return []
+
+        mode = "DRY RUN" if self.dry_run else "LIVE"
+        logger.info(
+            "Executing %d trades (%s): %s",
+            len(all_symbols), mode, all_symbols
+        )
+
+        # Run through the full trading pipeline
+        results = self.pipeline.run(all_symbols)
+
+        # Log execution summary
+        executed = [r for r in results if r.executed]
+        logger.info(
+            "Execution complete: %d/%d trades executed",
+            len(executed), len(all_symbols)
+        )
+
+        return results
+
+    @staticmethod
+    def format_execution_results(results: list) -> str:
+        """Format execution results for display."""
+        if not results:
+            return "\n  No trades executed.\n"
+
+        lines = [
+            "",
+            "=" * 70,
+            "  EXECUTION RESULTS",
+            "=" * 70,
+            f"  {'Symbol':<8} {'Signal':<6} {'Shares':>7} {'Price':>10} {'Status':<12} {'Order ID':<20}",
+            "  " + "-" * 66,
+        ]
+
+        for r in results:
+            order_id = r.order_id[:16] + "..." if r.order_id and len(r.order_id) > 16 else (r.order_id or "N/A")
+            lines.append(
+                f"  {r.symbol:<8} {r.signal:<6} {r.shares:>7} "
+                f"${r.price:>9.2f} {r.order_status or 'skipped':<12} {order_id:<20}"
+            )
+
+        # Summary counts
+        executed = sum(1 for r in results if r.executed)
+        total = len(results)
+        lines.append("  " + "-" * 66)
+        lines.append(f"  Executed: {executed}/{total} trades")
+        lines.append("=" * 70)
+        lines.append("")
+
+        return "\n".join(lines)
+
 
 # ── CLI ─────────────────────────────────────────────────────────
 
@@ -367,6 +455,22 @@ def main():
         default=60,
         help="Seconds between scans when using --loop (default: 60)",
     )
+    parser.add_argument(
+        "--execute",
+        action="store_true",
+        help="Execute trades based on scan results (requires --live for real trades)",
+    )
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        help="Enable LIVE trading (default is dry-run). Use with caution!",
+    )
+    parser.add_argument(
+        "--max-trades",
+        type=int,
+        default=3,
+        help="Maximum trades to execute per scan (default: 3)",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -391,7 +495,21 @@ def main():
     else:
         symbols = UNIVERSES[args.universe]
 
-    scanner = MarketScanner(client=client, max_workers=args.workers)
+    # Determine dry_run mode
+    dry_run = not args.live
+    if args.execute and args.live:
+        print("\n⚠️  WARNING: LIVE TRADING ENABLED - Real orders will be placed!")
+        print("    Press Ctrl+C within 5 seconds to cancel...\n")
+        import time
+        try:
+            time.sleep(5)
+        except KeyboardInterrupt:
+            print("\n🛑 Cancelled by user.")
+            return
+    elif args.execute:
+        print("\n📝 DRY RUN mode - No real orders will be placed")
+
+    scanner = MarketScanner(client=client, max_workers=args.workers, dry_run=dry_run)
 
     def run_scan():
         print(f"\n🔍 Scanning {len(symbols)} symbols from {args.universe} universe...\n")
@@ -402,6 +520,24 @@ def main():
             regime_filter=args.regime,
         )
         print(MarketScanner.format_summary(summary))
+
+        # Execute trades if requested
+        if args.execute and (summary.top_buys or summary.top_sells):
+            print("\n🚀 Executing trades based on scan results...")
+            results = scanner.execute_signals(
+                summary,
+                max_trades=args.max_trades,
+                min_score=args.min_score,
+            )
+            print(MarketScanner.format_execution_results(results))
+
+            # Also print detailed pipeline results for executed trades
+            executed = [r for r in results if r.executed]
+            if executed:
+                print("\n📋 Detailed execution log:")
+                for r in executed:
+                    print(TradingPipeline.format_result(r))
+
         return summary
 
     if args.loop:
