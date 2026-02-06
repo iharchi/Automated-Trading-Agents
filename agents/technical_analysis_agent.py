@@ -36,8 +36,9 @@ ADX_TREND_THRESHOLD = 25
 
 # Each indicator vote is +1 (bullish), -1 (bearish), or 0 (neutral).
 # The composite score is the sum; thresholds for action:
-BUY_THRESHOLD = 2
-SELL_THRESHOLD = -2
+# Lowered from 2/-2 to 1/-1 for more frequent signals
+BUY_THRESHOLD = 1
+SELL_THRESHOLD = -1
 
 
 @dataclass
