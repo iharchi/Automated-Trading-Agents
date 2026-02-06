@@ -31,7 +31,6 @@ from agents.base_agent import BaseAgent
 from agents.technical_analysis_agent import TechnicalAnalysisAgent
 from utils.alpaca_client import AlpacaClient
 from utils.market_regime import MarketRegimeDetector
-from utils.trading_pipeline import TradingPipeline
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +134,15 @@ class ScannerAgent(BaseAgent):
         # Sub-components
         self.ta_agent = TechnicalAnalysisAgent(client=self.client)
         self.regime_detector = MarketRegimeDetector(client=self.client)
-        self.pipeline = TradingPipeline(client=self.client, dry_run=dry_run)
+        self._pipeline = None  # Lazy init to avoid circular import
+
+    @property
+    def pipeline(self):
+        """Lazy-load the trading pipeline to avoid circular imports."""
+        if self._pipeline is None:
+            from utils.trading_pipeline import TradingPipeline
+            self._pipeline = TradingPipeline(client=self.client, dry_run=self.dry_run)
+        return self._pipeline
 
     # ── Symbol scanning ───────────────────────────────────────
 
