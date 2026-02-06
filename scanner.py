@@ -336,6 +336,17 @@ def main():
         default=5,
         help="Parallel workers for scanning (default: 5)",
     )
+    parser.add_argument(
+        "--loop",
+        action="store_true",
+        help="Run continuously every minute",
+    )
+    parser.add_argument(
+        "--interval",
+        type=int,
+        default=60,
+        help="Seconds between scans when using --loop (default: 60)",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -353,19 +364,32 @@ def main():
     else:
         symbols = UNIVERSES[args.universe]
 
-    print(f"\n🔍 Scanning {len(symbols)} symbols from {args.universe} universe...\n")
-
-    # Run scan
     scanner = MarketScanner(max_workers=args.workers)
-    summary = scanner.scan(
-        symbols,
-        top_n=args.top,
-        min_score=args.min_score,
-        regime_filter=args.regime,
-    )
 
-    # Display results
-    print(MarketScanner.format_summary(summary))
+    def run_scan():
+        print(f"\n🔍 Scanning {len(symbols)} symbols from {args.universe} universe...\n")
+        summary = scanner.scan(
+            symbols,
+            top_n=args.top,
+            min_score=args.min_score,
+            regime_filter=args.regime,
+        )
+        print(MarketScanner.format_summary(summary))
+        return summary
+
+    if args.loop:
+        import time
+        print(f"📡 Continuous scanning mode — every {args.interval} seconds")
+        print("Press Ctrl+C to stop\n")
+        try:
+            while True:
+                run_scan()
+                print(f"⏳ Next scan in {args.interval} seconds...\n")
+                time.sleep(args.interval)
+        except KeyboardInterrupt:
+            print("\n\n🛑 Scanner stopped.")
+    else:
+        run_scan()
 
 
 if __name__ == "__main__":
