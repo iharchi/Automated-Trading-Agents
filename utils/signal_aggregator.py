@@ -89,8 +89,8 @@ class SignalAggregator:
         self,
         *,
         weights: dict[str, float] | None = None,
-        buy_threshold: float = 0.25,
-        sell_threshold: float = -0.25,
+        buy_threshold: float = 0.10,  # Lowered from 0.25 for more signals
+        sell_threshold: float = -0.10,  # Lowered from -0.25 for more signals
         min_sources: int = 1,
         regime_adaptive: bool = True,
         agreement_bonus: float = 0.10,
