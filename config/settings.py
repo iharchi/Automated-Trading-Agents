@@ -43,6 +43,7 @@ class Settings:
 
     TRADING_MODE: str = os.getenv("TRADING_MODE", _y("trading", "mode", "paper"))
     TIMEFRAME: str = _y("trading", "timeframe", "1Day")
+    INTERVAL: int = int(_y("trading", "interval", 15))  # Check interval in minutes
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", _y("logging", "level", "INFO"))
 
     # ── Technical Analysis ───────────────────────────────────
@@ -88,7 +89,7 @@ class Settings:
     PM_SELL_THRESHOLD: float = float(_y("portfolio_manager", "sell_threshold", -0.25))
 
     # ── Scheduler ────────────────────────────────────────────
-    SCHED_INTERVAL: int = int(_y("scheduler", "interval_minutes", 15))
+    SCHED_INTERVAL: int = int(_y("trading", "interval", _y("scheduler", "interval_minutes", 1)))
     SCHED_NO_WAIT: bool = _y("scheduler", "no_wait", False)
 
     # ── Pre-flight Health Checks ──────────────────────────────

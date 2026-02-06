@@ -14,12 +14,15 @@ alpaca:
 trading:
   mode: paper
   default_symbols:
-    - AAPL
-    - MSFT
-    - GOOGL
-    - AMZN
+    - NVDA
+    - AMD
     - TSLA
+    - COIN
+    - MARA
+    - SMCI
+    - PLTR
   timeframe: 1Day            # 1Min, 5Min, 15Min, 1Hour, 1Day
+  interval: 1                # Check every 1 minute
 
 # Technical Analysis Agent
 technical_analysis:
