@@ -3,6 +3,7 @@
 End-to-end pipeline that chains every component together for
 automated trade execution:
 
+    0. (Optional) Scanner Agent — scan market for opportunities
     1. Market Regime Detection (SPY proxy)
     2. Per-symbol: TA → Sentiment → Signal Aggregator (regime-aware)
     3. Correlation check against existing positions
@@ -13,10 +14,12 @@ automated trade execution:
     8. Journal + Notify + Event Bus throughout
 
 Usage:
+    # Standard mode - run on specific symbols
     pipeline = TradingPipeline(dry_run=True)
     results = pipeline.run(["AAPL", "MSFT"], timeframe="1Day")
-    for r in results:
-        print(TradingPipeline.format_result(r))
+
+    # Scan mode - scan market and execute on opportunities
+    results = pipeline.scan_and_run(universe="VOLATILE", max_trades=3)
 """
 
 import logging
@@ -36,6 +39,7 @@ from agents.technical_analysis_agent import TechnicalAnalysisAgent
 from agents.sentiment_analysis_agent import SentimentAnalysisAgent
 from agents.risk_management_agent import RiskManagementAgent
 from agents.execution_agent import ExecutionAgent
+from agents.scanner_agent import ScannerAgent
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +111,7 @@ class TradingPipeline:
         exec_agent: ExecutionAgent | None = None,
         ta_agent: TechnicalAnalysisAgent | None = None,
         sentiment_agent: SentimentAnalysisAgent | None = None,
+        scanner_agent: ScannerAgent | None = None,
         # Feature toggles
         enable_regime: bool = True,
         enable_correlation: bool = True,
@@ -131,6 +136,7 @@ class TradingPipeline:
         self.exec_agent = exec_agent
         self.ta_agent = ta_agent
         self.sentiment_agent = sentiment_agent
+        self.scanner_agent = scanner_agent
 
         # Toggles
         self.enable_regime = enable_regime
@@ -174,6 +180,13 @@ class TradingPipeline:
             )
         if self.enable_journal and self.journal is None:
             self.journal = TradeJournal()
+
+        if self.scanner_agent is None:
+            self.scanner_agent = ScannerAgent(
+                client=self.client,
+                auto_trade=False,  # Pipeline handles execution
+                dry_run=self.dry_run,
+            )
 
     # ── Event helpers ─────────────────────────────────────────────
 
@@ -667,6 +680,139 @@ class TradingPipeline:
             results.append(result)
 
         return results
+
+    # ── Scan and Run ─────────────────────────────────────────────
+
+    def scan_and_run(
+        self,
+        universe: str = "VOLATILE",
+        *,
+        symbols: list[str] | None = None,
+        max_trades: int = 3,
+        min_score: float = 0.0,
+        timeframe: str = "1Day",
+    ) -> tuple[dict, list["PipelineResult"]]:
+        """Scan the market for opportunities and execute on the best ones.
+
+        This is the fully autonomous mode: the Scanner Agent finds opportunities,
+        then the pipeline executes trades on the top signals.
+
+        Args:
+            universe: Stock universe to scan (VOLATILE, MOST_ACTIVE, TECH, etc.)
+            symbols: Custom symbols (for CUSTOM universe)
+            max_trades: Maximum trades to execute
+            min_score: Minimum combined score to consider
+            timeframe: Timeframe for analysis
+
+        Returns:
+            Tuple of (scan_result_dict, list_of_pipeline_results)
+        """
+        self._ensure_components()
+
+        logger.info("Starting scan_and_run: universe=%s, max_trades=%d", universe, max_trades)
+
+        # Step 0: Scanner Agent finds opportunities
+        scan_result = self.scanner_agent.analyze(
+            universe,
+            symbols=symbols,
+            top_n=max_trades * 2,  # Get more candidates than needed
+        )
+
+        # Emit scan event
+        self._emit(
+            "scan_completed",
+            {
+                "universe": universe,
+                "buy_signals": scan_result.get("buy_signals", 0),
+                "sell_signals": scan_result.get("sell_signals", 0),
+                "market_regime": scan_result.get("market_regime", ""),
+            },
+            source="ScannerAgent",
+        )
+
+        # Extract top symbols to trade
+        top_buys = scan_result.get("top_buys", [])
+        top_sells = scan_result.get("top_sells", [])
+
+        buy_symbols = [
+            (o["symbol"] if isinstance(o, dict) else o.symbol)
+            for o in top_buys
+            if (o.get("combined_score", 0) if isinstance(o, dict) else o.combined_score) >= min_score
+        ][:max_trades]
+
+        sell_symbols = [
+            (o["symbol"] if isinstance(o, dict) else o.symbol)
+            for o in top_sells
+            if abs(o.get("combined_score", 0) if isinstance(o, dict) else o.combined_score) >= min_score
+        ][:max_trades]
+
+        all_symbols = buy_symbols + sell_symbols
+
+        if not all_symbols:
+            logger.info("No symbols meet criteria after scan")
+            return scan_result, []
+
+        mode = "DRY RUN" if self.dry_run else "LIVE"
+        logger.info("Executing %d trades (%s): %s", len(all_symbols), mode, all_symbols)
+
+        # Run the standard pipeline on selected symbols
+        pipeline_results = self.run(all_symbols, timeframe=timeframe)
+
+        # Log summary
+        executed = sum(1 for r in pipeline_results if r.executed)
+        logger.info(
+            "scan_and_run complete: scanned=%d, signals=%d BUY / %d SELL, executed=%d/%d",
+            scan_result.get("total_scanned", 0),
+            scan_result.get("buy_signals", 0),
+            scan_result.get("sell_signals", 0),
+            executed,
+            len(all_symbols),
+        )
+
+        return scan_result, pipeline_results
+
+    def run_continuous(
+        self,
+        universe: str = "VOLATILE",
+        *,
+        interval: int = 60,
+        max_trades: int = 3,
+        callback: callable = None,
+    ):
+        """Run the pipeline in continuous scan-and-execute mode.
+
+        Args:
+            universe: Stock universe to scan
+            interval: Seconds between scan cycles
+            max_trades: Max trades per cycle
+            callback: Optional function called with (scan_result, pipeline_results)
+        """
+        import time
+
+        logger.info(
+            "Starting continuous pipeline: universe=%s, interval=%ds, max_trades=%d",
+            universe, interval, max_trades,
+        )
+
+        try:
+            while True:
+                scan_result, pipeline_results = self.scan_and_run(
+                    universe, max_trades=max_trades,
+                )
+
+                if callback:
+                    callback(scan_result, pipeline_results)
+                else:
+                    # Default: print summary
+                    print(ScannerAgent.format_analysis(scan_result))
+                    if pipeline_results:
+                        print(self.format_summary(pipeline_results))
+
+                logger.info("Next scan in %d seconds...", interval)
+                time.sleep(interval)
+
+        except KeyboardInterrupt:
+            logger.info("Continuous pipeline stopped by user")
 
     # ── Formatting ────────────────────────────────────────────────
 
