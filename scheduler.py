@@ -9,6 +9,8 @@ Usage:
     python scheduler.py --once                      # single pass then exit
     python scheduler.py --auto-trade                # enable live paper-trade execution
     python scheduler.py --skip-preflight            # skip pre-flight health checks
+    python scheduler.py --daemon                    # run as background daemon
+    python scheduler.py --scan                      # use scanner mode instead of fixed symbols
 
 The scheduler:
     1. Runs pre-flight health checks (API, account, buying power, data).
@@ -19,14 +21,24 @@ The scheduler:
     6. Sleeps for --interval minutes and repeats.
     7. If the market is closed, calculates time until next open and
        waits (or exits if --no-wait is set).
+
+Daemon mode:
+    Run as a background process that automatically starts trading at market
+    open and stops at market close. Use --daemon flag to enable.
+
+    To start:  python scheduler.py --daemon --auto-trade
+    To stop:   python scheduler.py --stop
+    To status: python scheduler.py --status
 """
 
 import argparse
 import logging
+import os
 import signal
 import sys
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 from config.settings import Settings
 from utils.alpaca_client import AlpacaClient
@@ -36,8 +48,12 @@ from utils.position_sizer import PositionSizer
 from utils.preflight import PreflightCheck
 from utils.signal_aggregator import SignalAggregator
 from utils.trading_pipeline import TradingPipeline
+from agents.scanner_agent import ScannerAgent, UNIVERSES
 
 logger = logging.getLogger("scheduler")
+
+# PID file for daemon mode
+PID_FILE = Path(__file__).parent / ".scheduler.pid"
 
 # Graceful shutdown
 _shutdown = False
@@ -170,6 +186,50 @@ def run_cycle(
         return []
 
 
+def run_scan_cycle(
+    client: AlpacaClient,
+    universe: str,
+    dry_run: bool,
+    cycle_number: int = 0,
+) -> dict:
+    """Run one scan cycle using the Scanner Agent.
+
+    Returns:
+        Scan summary dict.
+    """
+    now = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
+    print(f"\n--- Scan Cycle #{cycle_number} start: {now} ---")
+
+    try:
+        scanner = ScannerAgent(
+            client=client,
+            auto_trade=not dry_run,
+            dry_run=dry_run,
+            max_workers=8,
+            max_trades=5,
+            min_score=0.05,
+            top_n=15,
+        )
+
+        symbols = UNIVERSES.get(universe, UNIVERSES["DEFAULT"])
+        summary = scanner.scan_and_execute(symbols)
+
+        print(ScannerAgent.format_summary(summary))
+
+        print(
+            f"--- Scan Cycle #{cycle_number} complete: "
+            f"{summary.buy_signals} BUY / {summary.sell_signals} SELL / "
+            f"{summary.trades_executed} executed ---\n"
+        )
+
+        return summary
+
+    except Exception as e:
+        logger.error("Scan cycle %d failed: %s", cycle_number, e)
+        print(f"--- Scan Cycle #{cycle_number} FAILED: {e} ---\n")
+        return {}
+
+
 # ── Market hours wait ────────────────────────────────────────────
 
 def wait_for_market_open(client: AlpacaClient, no_wait: bool) -> bool:
@@ -229,6 +289,87 @@ def run_preflight(
     return True
 
 
+# ── Daemon helpers ───────────────────────────────────────────────
+
+def daemonize():
+    """Fork process to run as daemon (Unix only)."""
+    if sys.platform == "win32":
+        logger.error("Daemon mode not supported on Windows")
+        sys.exit(1)
+
+    # First fork
+    try:
+        pid = os.fork()
+        if pid > 0:
+            print(f"Scheduler started as daemon (PID: {pid})")
+            sys.exit(0)
+    except OSError as e:
+        logger.error("Fork #1 failed: %s", e)
+        sys.exit(1)
+
+    # Decouple from parent
+    os.setsid()
+    os.umask(0)
+
+    # Second fork
+    try:
+        pid = os.fork()
+        if pid > 0:
+            sys.exit(0)
+    except OSError as e:
+        logger.error("Fork #2 failed: %s", e)
+        sys.exit(1)
+
+    # Redirect standard file descriptors
+    sys.stdout.flush()
+    sys.stderr.flush()
+
+    # Write PID file
+    PID_FILE.write_text(str(os.getpid()))
+    logger.info("Daemon started with PID %d", os.getpid())
+
+
+def check_daemon_status() -> tuple[bool, int | None]:
+    """Check if daemon is running. Returns (running, pid)."""
+    if not PID_FILE.exists():
+        return False, None
+
+    pid = int(PID_FILE.read_text().strip())
+    try:
+        os.kill(pid, 0)  # Check if process exists
+        return True, pid
+    except OSError:
+        # Stale PID file
+        PID_FILE.unlink()
+        return False, None
+
+
+def stop_daemon() -> bool:
+    """Stop running daemon."""
+    running, pid = check_daemon_status()
+    if not running:
+        print("Scheduler is not running")
+        return False
+
+    try:
+        os.kill(pid, signal.SIGTERM)
+        print(f"Sent stop signal to scheduler (PID: {pid})")
+        # Wait for process to stop
+        for _ in range(10):
+            time.sleep(0.5)
+            try:
+                os.kill(pid, 0)
+            except OSError:
+                PID_FILE.unlink() if PID_FILE.exists() else None
+                print("Scheduler stopped")
+                return True
+        print("Warning: Scheduler may still be running")
+        return True
+    except OSError as e:
+        print(f"Error stopping scheduler: {e}")
+        return False
+
+
 # ── Main ─────────────────────────────────────────────────────────
 
 def main():
@@ -283,7 +424,54 @@ def main():
         action="store_true",
         help="Show event bus history after each cycle",
     )
+    parser.add_argument(
+        "--daemon",
+        action="store_true",
+        help="Run as background daemon process",
+    )
+    parser.add_argument(
+        "--status",
+        action="store_true",
+        help="Check if scheduler daemon is running",
+    )
+    parser.add_argument(
+        "--stop",
+        action="store_true",
+        help="Stop running scheduler daemon",
+    )
+    parser.add_argument(
+        "--scan",
+        action="store_true",
+        help="Use scanner mode to find trading opportunities",
+    )
+    parser.add_argument(
+        "--universe",
+        default="VOLATILE",
+        choices=["DEFAULT", "TECH", "VOLATILE", "SP500_TOP", "DIVIDEND", "ALL"],
+        help="Stock universe for scan mode (default: VOLATILE)",
+    )
     args = parser.parse_args()
+
+    # Handle daemon management commands first
+    if args.status:
+        running, pid = check_daemon_status()
+        if running:
+            print(f"Scheduler is running (PID: {pid})")
+        else:
+            print("Scheduler is not running")
+        return
+
+    if args.stop:
+        stop_daemon()
+        return
+
+    # Start as daemon if requested
+    if args.daemon:
+        running, pid = check_daemon_status()
+        if running:
+            print(f"Scheduler already running (PID: {pid})")
+            sys.exit(1)
+        daemonize()
 
     logging.basicConfig(
         level=getattr(logging, Settings.LOG_LEVEL, logging.INFO),
@@ -345,9 +533,12 @@ def main():
 
     # ── Single-pass mode ─────────────────────────────────────
     if args.once:
-        results = run_cycle(pipeline, symbols, args.timeframe, cycle_number=1)
-        if bus and args.show_events:
-            print(EventBus.format_history(bus.get_history(limit=50)))
+        if args.scan:
+            run_scan_cycle(client, args.universe, dry_run, cycle_number=1)
+        else:
+            results = run_cycle(pipeline, symbols, args.timeframe, cycle_number=1)
+            if bus and args.show_events:
+                print(EventBus.format_history(bus.get_history(limit=50)))
         return
 
     # ── Continuous loop ──────────────────────────────────────
@@ -360,10 +551,13 @@ def main():
             break
 
         cycle += 1
-        results = run_cycle(pipeline, symbols, args.timeframe, cycle_number=cycle)
 
-        if bus and args.show_events:
-            print(EventBus.format_history(bus.get_history(limit=30)))
+        if args.scan:
+            run_scan_cycle(client, args.universe, dry_run, cycle_number=cycle)
+        else:
+            results = run_cycle(pipeline, symbols, args.timeframe, cycle_number=cycle)
+            if bus and args.show_events:
+                print(EventBus.format_history(bus.get_history(limit=30)))
 
         if _shutdown:
             break
@@ -382,6 +576,10 @@ def main():
             sleep_seconds -= 10
 
     print(f"\nScheduler stopped after {cycle} cycle(s).")
+
+    # Cleanup PID file on exit
+    if PID_FILE.exists():
+        PID_FILE.unlink()
 
 
 if __name__ == "__main__":
