@@ -140,6 +140,7 @@ class AlpacaClient:
                 "market_value": float(p.market_value),
                 "unrealized_pl": float(p.unrealized_pl),
                 "current_price": float(p.current_price),
+                "avg_entry_price": float(p.avg_entry_price),
             }
             for p in positions
         ]
