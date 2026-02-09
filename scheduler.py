@@ -211,15 +211,20 @@ def run_scan_cycle(
             top_n=15,
         )
 
-        symbols = UNIVERSES.get(universe, UNIVERSES["DEFAULT"])
-        summary = scanner.scan_and_execute(symbols)
+        # Use the scan method with execute=True
+        summary = scanner.scan(universe=universe, execute=not dry_run)
 
         print(ScannerAgent.format_summary(summary))
 
+        # Extract stats from summary
+        buy_signals = summary.get("buy_signals", 0)
+        sell_signals = summary.get("sell_signals", 0)
+        trades_executed = summary.get("trades_executed", 0)
+
         print(
             f"--- Scan Cycle #{cycle_number} complete: "
-            f"{summary.buy_signals} BUY / {summary.sell_signals} SELL / "
-            f"{summary.trades_executed} executed ---\n"
+            f"{buy_signals} BUY / {sell_signals} SELL / "
+            f"{trades_executed} executed ---\n"
         )
 
         return summary
