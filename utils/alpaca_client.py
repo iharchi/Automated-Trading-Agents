@@ -30,13 +30,20 @@ class AlpacaClient:
     def get_account(self) -> dict:
         """Return account details as a dictionary."""
         account = self.api.get_account()
+        equity = float(account.equity)
+        last_equity = float(account.last_equity)
+        daily_pnl = equity - last_equity
+        daily_pnl_pct = (daily_pnl / last_equity * 100) if last_equity > 0 else 0
         return {
             "id": account.id,
             "status": account.status,
             "cash": float(account.cash),
             "portfolio_value": float(account.portfolio_value),
             "buying_power": float(account.buying_power),
-            "equity": float(account.equity),
+            "equity": equity,
+            "last_equity": last_equity,
+            "daily_pnl": daily_pnl,
+            "daily_pnl_pct": daily_pnl_pct,
             "currency": account.currency,
         }
 

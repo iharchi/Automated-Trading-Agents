@@ -150,10 +150,10 @@ class DashboardData:
         total_market_value = sum(abs(p.get("market_value", 0)) for p in positions)
         pnl_class = "positive" if total_unrealized_pnl >= 0 else "negative"
 
-        # Calculate daily P&L (approximate from account)
+        # Get daily P&L from account
         equity = account.get('equity', 0)
-        last_equity = account.get('last_equity', equity)
-        daily_pnl = equity - last_equity if last_equity else 0
+        daily_pnl = account.get('daily_pnl', 0)
+        daily_pnl_pct = account.get('daily_pnl_pct', 0)
         daily_pnl_class = "positive" if daily_pnl >= 0 else "negative"
 
         # Build HTML
@@ -199,7 +199,7 @@ class DashboardData:
     <div class="label">Unrealized P&L (Open Positions)</div>
   </div>
   <div class="pnl-card metric">
-    <div class="value {daily_pnl_class}">${daily_pnl:+,.2f}</div>
+    <div class="value {daily_pnl_class}">${daily_pnl:+,.2f} ({daily_pnl_pct:+.2f}%)</div>
     <div class="label">Daily P&L</div>
   </div>
 </div>
