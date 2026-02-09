@@ -44,6 +44,7 @@ class PositionMetrics:
     hit_take_profit: bool = False
     hit_stop_loss: bool = False
     hit_trailing_stop: bool = False
+    hit_max_loss: bool = False  # Hit $50 max loss limit
 
     last_updated: datetime = field(default_factory=datetime.now)
 
@@ -84,6 +85,7 @@ class ProfitMonitor:
     DEFAULT_TRAILING_STOP_PCT = 0.08  # 8% trailing stop from peak (reduce whipsaws)
     DEFAULT_DAILY_LOSS_LIMIT_PCT = 0.04  # 4% daily loss limit
     DEFAULT_MAX_DRAWDOWN_PCT = 0.12  # 12% max drawdown
+    DEFAULT_MAX_LOSS_PER_POSITION = 50.0  # $50 max loss per position
 
     def __init__(
         self,
@@ -94,6 +96,7 @@ class ProfitMonitor:
         trailing_stop_pct: float = DEFAULT_TRAILING_STOP_PCT,
         daily_loss_limit_pct: float = DEFAULT_DAILY_LOSS_LIMIT_PCT,
         max_drawdown_pct: float = DEFAULT_MAX_DRAWDOWN_PCT,
+        max_loss_per_position: float = DEFAULT_MAX_LOSS_PER_POSITION,
     ):
         self.client = client or AlpacaClient()
         self.take_profit_pct = take_profit_pct
@@ -101,6 +104,7 @@ class ProfitMonitor:
         self.trailing_stop_pct = trailing_stop_pct
         self.daily_loss_limit_pct = daily_loss_limit_pct
         self.max_drawdown_pct = max_drawdown_pct
+        self.max_loss_per_position = max_loss_per_position
 
         # State tracking
         self._position_peaks: dict[str, float] = {}  # symbol -> peak price
@@ -175,6 +179,9 @@ class ProfitMonitor:
             hit_stop_loss = current_price >= stop_loss_price
             hit_trailing_stop = current_price >= trailing_stop_price and trough_price < entry_price
 
+        # Check max dollar loss per position ($50 default)
+        hit_max_loss = unrealized_pnl <= -self.max_loss_per_position
+
         return PositionMetrics(
             symbol=symbol,
             qty=qty,
@@ -191,6 +198,7 @@ class ProfitMonitor:
             hit_take_profit=hit_take_profit,
             hit_stop_loss=hit_stop_loss,
             hit_trailing_stop=hit_trailing_stop,
+            hit_max_loss=hit_max_loss,
         )
 
     def get_portfolio_metrics(self) -> PortfolioMetrics:
@@ -306,6 +314,17 @@ class ProfitMonitor:
                     "qty": pos.qty,
                     "current_price": pos.current_price,
                     "target_price": pos.stop_loss_price,
+                    "pnl_pct": pos.unrealized_pnl_pct,
+                    "pnl": pos.unrealized_pnl,
+                })
+            elif pos.hit_max_loss:
+                to_close.append({
+                    "symbol": symbol,
+                    "reason": "max_loss_$50",
+                    "side": pos.side,
+                    "qty": pos.qty,
+                    "current_price": pos.current_price,
+                    "target_price": pos.entry_price,
                     "pnl_pct": pos.unrealized_pnl_pct,
                     "pnl": pos.unrealized_pnl,
                 })

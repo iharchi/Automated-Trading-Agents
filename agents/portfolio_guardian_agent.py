@@ -163,6 +163,7 @@ class PortfolioGuardianAgent(BaseAgent):
     DEFAULT_MAX_DRAWDOWN = 0.12         # 12% max drawdown
     DEFAULT_MAX_SECTOR_PCT = 0.40       # 40% max per sector (more concentration allowed)
     DEFAULT_MIN_SECTOR_PCT = 0.05       # 5% min per sector (for diversification)
+    DEFAULT_MAX_LOSS_PER_POSITION = 50.0  # $50 max loss per position - auto-sell
 
     def __init__(
         self,
@@ -174,6 +175,7 @@ class PortfolioGuardianAgent(BaseAgent):
         daily_loss_limit_pct: float = DEFAULT_DAILY_LOSS_LIMIT,
         max_drawdown_pct: float = DEFAULT_MAX_DRAWDOWN,
         max_sector_pct: float = DEFAULT_MAX_SECTOR_PCT,
+        max_loss_per_position: float = DEFAULT_MAX_LOSS_PER_POSITION,
         auto_trade: bool = False,
         dry_run: bool = False,
     ):
@@ -184,6 +186,7 @@ class PortfolioGuardianAgent(BaseAgent):
         self.daily_loss_limit_pct = daily_loss_limit_pct
         self.max_drawdown_pct = max_drawdown_pct
         self.max_sector_pct = max_sector_pct
+        self.max_loss_per_position = max_loss_per_position
         self.auto_trade = auto_trade
         self.dry_run = dry_run
 
@@ -195,6 +198,7 @@ class PortfolioGuardianAgent(BaseAgent):
             stop_loss_pct=stop_loss_pct,
             daily_loss_limit_pct=daily_loss_limit_pct,
             max_drawdown_pct=max_drawdown_pct,
+            max_loss_per_position=max_loss_per_position,
         )
 
         # State
