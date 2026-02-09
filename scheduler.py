@@ -265,6 +265,71 @@ def wait_for_market_open(client: AlpacaClient, no_wait: bool) -> bool:
     return not _shutdown
 
 
+def minutes_until_close(client: AlpacaClient) -> float:
+    """Get minutes until market close."""
+    clock = client.api.get_clock()
+    if not clock.is_open:
+        return 0
+    now = clock.timestamp
+    close_time = clock.next_close
+    return (close_time - now).total_seconds() / 60
+
+
+def close_all_positions(client: AlpacaClient, dry_run: bool = False) -> list[dict]:
+    """Close all open positions before end of day.
+
+    Returns:
+        List of closed position results.
+    """
+    positions = client.get_positions()
+    results = []
+
+    if not positions:
+        logger.info("No positions to close.")
+        return results
+
+    print(f"\n{'=' * 60}")
+    print(f"  END OF DAY - CLOSING ALL POSITIONS")
+    print(f"{'=' * 60}")
+
+    for pos in positions:
+        symbol = pos["symbol"]
+        qty = pos["qty"]
+        pnl = pos.get("unrealized_pl", 0)
+
+        result = {
+            "symbol": symbol,
+            "qty": qty,
+            "pnl": pnl,
+            "status": "pending",
+        }
+
+        if dry_run:
+            result["status"] = "dry_run"
+            logger.info("[DRY RUN] Would close %s: %d shares (P&L: $%.2f)", symbol, qty, pnl)
+        else:
+            try:
+                order = client.api.close_position(symbol)
+                result["status"] = "closed"
+                result["order_id"] = order.id
+                logger.info("Closed %s: %d shares (P&L: $%.2f) - Order: %s",
+                           symbol, qty, pnl, order.id)
+            except Exception as e:
+                result["status"] = "failed"
+                result["error"] = str(e)
+                logger.error("Failed to close %s: %s", symbol, e)
+
+        results.append(result)
+        print(f"  {symbol:8s} {qty:>6d} shares  P&L: ${pnl:+,.2f}  [{result['status']}]")
+
+    total_pnl = sum(r["pnl"] for r in results)
+    print(f"{'─' * 60}")
+    print(f"  Total P&L: ${total_pnl:+,.2f}")
+    print(f"{'=' * 60}\n")
+
+    return results
+
+
 # ── Pre-flight ───────────────────────────────────────────────────
 
 def run_preflight(
@@ -455,6 +520,23 @@ def main():
         choices=["DEFAULT", "TECH", "VOLATILE", "SP500_TOP", "DIVIDEND", "ALL"],
         help="Stock universe for scan mode (default: VOLATILE)",
     )
+    parser.add_argument(
+        "--close-eod",
+        action="store_true",
+        default=True,
+        help="Close all positions before end of day (default: True)",
+    )
+    parser.add_argument(
+        "--no-close-eod",
+        action="store_true",
+        help="Don't close positions at end of day (hold overnight)",
+    )
+    parser.add_argument(
+        "--eod-minutes",
+        type=int,
+        default=15,
+        help="Minutes before market close to close all positions (default: 15)",
+    )
     args = parser.parse_args()
 
     # Handle daemon management commands first
@@ -492,6 +574,9 @@ def main():
     no_wait = args.no_wait or Settings.SCHED_NO_WAIT
 
     mode = "AUTO-TRADE" if args.auto_trade else "DRY-RUN"
+    close_eod = args.close_eod and not args.no_close_eod
+    eod_minutes = args.eod_minutes
+
     print(f"\n{'=' * 62}")
     print(f"  AUTOMATED TRADING SCHEDULER")
     print(f"{'=' * 62}")
@@ -499,6 +584,7 @@ def main():
     print(f"  Symbols      : {', '.join(symbols)}")
     print(f"  Interval     : {interval} min")
     print(f"  Timeframe    : {args.timeframe}")
+    print(f"  Close EOD    : {'ON' if close_eod else 'OFF'} ({eod_minutes} min before close)")
     print(f"  Regime       : {'ON' if Settings.PIPELINE_ENABLE_REGIME else 'OFF'}")
     print(f"  Correlation  : {'ON' if Settings.PIPELINE_ENABLE_CORRELATION else 'OFF'}")
     print(f"  Sizer        : Kelly ({Settings.SIZER_KELLY_FACTOR:.0%})")
@@ -566,6 +652,20 @@ def main():
 
         if _shutdown:
             break
+
+        # Check if we need to close all positions before end of day
+        if close_eod and client.is_market_open():
+            mins_to_close = minutes_until_close(client)
+            if mins_to_close <= eod_minutes and mins_to_close > 0:
+                logger.info("Market closes in %.1f minutes - closing all positions", mins_to_close)
+                close_all_positions(client, dry_run=dry_run)
+                logger.info("End of day position close complete. Waiting for market close.")
+                # Wait for market to actually close
+                while client.is_market_open() and not _shutdown:
+                    time.sleep(30)
+                if no_wait:
+                    break
+                continue
 
         # Check if market is still open before sleeping
         if not client.is_market_open():
