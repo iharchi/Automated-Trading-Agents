@@ -145,6 +145,17 @@ class DashboardData:
         account = status.get("account") or {}
         market = "OPEN" if status.get("market_open") else "CLOSED"
 
+        # Calculate overall P&L
+        total_unrealized_pnl = sum(p.get("unrealized_pl", 0) for p in positions)
+        total_market_value = sum(abs(p.get("market_value", 0)) for p in positions)
+        pnl_class = "positive" if total_unrealized_pnl >= 0 else "negative"
+
+        # Calculate daily P&L (approximate from account)
+        equity = account.get('equity', 0)
+        last_equity = account.get('last_equity', equity)
+        daily_pnl = equity - last_equity if last_equity else 0
+        daily_pnl_class = "positive" if daily_pnl >= 0 else "negative"
+
         # Build HTML
         html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -162,6 +173,9 @@ class DashboardData:
   .metric {{ text-align: center; }}
   .metric .value {{ font-size: 24px; font-weight: bold; color: #00d4ff; }}
   .metric .label {{ font-size: 12px; color: #888; margin-top: 5px; }}
+  .pnl-card {{ background: #16213e; border-radius: 8px; padding: 20px; margin: 15px 0; border: 2px solid #0f3460; }}
+  .pnl-card .value {{ font-size: 36px; font-weight: bold; }}
+  .pnl-card .label {{ font-size: 14px; color: #888; margin-top: 5px; }}
   table {{ width: 100%; border-collapse: collapse; margin: 10px 0; }}
   th {{ text-align: left; padding: 8px; border-bottom: 2px solid #0f3460; color: #00d4ff; }}
   td {{ padding: 6px 8px; border-bottom: 1px solid #0f3460; }}
@@ -180,8 +194,19 @@ class DashboardData:
 <p class="timestamp">Last updated: {status['timestamp']} | Market: <span class="status-{'open' if status.get('market_open') else 'closed'}">{market}</span></p>
 
 <div class="grid">
+  <div class="pnl-card metric">
+    <div class="value {pnl_class}">${total_unrealized_pnl:+,.2f}</div>
+    <div class="label">Unrealized P&L (Open Positions)</div>
+  </div>
+  <div class="pnl-card metric">
+    <div class="value {daily_pnl_class}">${daily_pnl:+,.2f}</div>
+    <div class="label">Daily P&L</div>
+  </div>
+</div>
+
+<div class="grid">
   <div class="card metric">
-    <div class="value">${account.get('equity', 0):,.0f}</div>
+    <div class="value">${equity:,.0f}</div>
     <div class="label">Equity</div>
   </div>
   <div class="card metric">
@@ -191,6 +216,14 @@ class DashboardData:
   <div class="card metric">
     <div class="value">${account.get('cash', 0):,.0f}</div>
     <div class="label">Cash</div>
+  </div>
+  <div class="card metric">
+    <div class="value">${total_market_value:,.0f}</div>
+    <div class="label">Position Value</div>
+  </div>
+  <div class="card metric">
+    <div class="value">{len(positions)}</div>
+    <div class="label">Open Positions</div>
   </div>
   <div class="card metric">
     <div class="value">{perf.get('total_orders', 0)}</div>
