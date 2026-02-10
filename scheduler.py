@@ -1183,7 +1183,19 @@ def main():
             if cycle % 10 == 0 and scalp_manager:
                 print(scalp_manager.format_stats())
 
-        # Run pipeline optimizer periodically
+        elif args.finviz:
+            run_finviz_cycle(
+                pipeline, args.finviz_screen, args.timeframe,
+                cycle_number=cycle, check_news=check_news, require_news=require_news
+            )
+        elif args.scan:
+            run_scan_cycle(client, args.universe, dry_run, cycle_number=cycle)
+        else:
+            results = run_cycle(pipeline, symbols, args.timeframe, cycle_number=cycle)
+            if bus and args.show_events:
+                print(EventBus.format_history(bus.get_history(limit=30)))
+
+        # Run pipeline optimizer periodically (after any cycle type)
         if optimizer and args.optimize_cycles > 0 and cycle % args.optimize_cycles == 0:
             try:
                 logger.info("Running pipeline optimizer (cycle %d)...", cycle)
@@ -1199,18 +1211,6 @@ def main():
                         logger.warning("  [!] %s", s.get("title", ""))
             except Exception as e:
                 logger.warning("Optimizer failed: %s", e)
-
-        elif args.finviz:
-            run_finviz_cycle(
-                pipeline, args.finviz_screen, args.timeframe,
-                cycle_number=cycle, check_news=check_news, require_news=require_news
-            )
-        elif args.scan:
-            run_scan_cycle(client, args.universe, dry_run, cycle_number=cycle)
-        else:
-            results = run_cycle(pipeline, symbols, args.timeframe, cycle_number=cycle)
-            if bus and args.show_events:
-                print(EventBus.format_history(bus.get_history(limit=30)))
 
         if _shutdown:
             break
