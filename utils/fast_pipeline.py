@@ -383,12 +383,17 @@ class FastPipeline:
                 exec_analysis = exec_agent.analyze(result.symbol, decision=decision)
                 exec_result = exec_agent.execute(result.symbol, exec_analysis)
 
-                result.executed = exec_result.get("status") in ("filled", "dry_run", "pending")
+                result.executed = exec_result.get("status") in ("filled", "dry_run", "pending", "partially_filled")
                 result.order_id = exec_result.get("order_id", "")
                 result.status = exec_result.get("status", "")
 
+                # Capture error message for failed trades
+                if result.status == "failed":
+                    result.error = exec_result.get("error", "Unknown error")
+
             except Exception as e:
                 result.error = f"Execution error: {e}"
+                result.status = "failed"
                 logger.error("Trade execution failed for %s: %s", result.symbol, e)
 
     # ── Pre-market Scanning ──────────────────────────────────────
@@ -640,18 +645,32 @@ class FastPipeline:
             f"  {'-' * 76}",
         ]
 
+        failed_errors = []
         for r in results:
             lines.append(
                 f"  {r.symbol:8s} {r.signal:6s} {r.score:>+8.4f} "
                 f"${r.price:>9.2f} {r.shares:>7d} {r.status or 'N/A':>10s} "
                 f"{r.latency_ms:>6.0f}ms"
             )
+            # Track failed trade errors
+            if r.status == "failed" and r.error:
+                failed_errors.append(f"  {r.symbol}: {r.error[:50]}")
 
         executed = sum(1 for r in results if r.executed)
+        partially = sum(1 for r in results if r.status == "partially_filled")
+        failed = sum(1 for r in results if r.status == "failed")
         avg_latency = sum(r.latency_ms for r in results) / len(results) if results else 0
 
         lines.append(f"{'~' * 80}")
-        lines.append(f"  Executed: {executed}/{len(results)}  |  Avg latency: {avg_latency:.0f}ms")
+        lines.append(f"  Executed: {executed}/{len(results)} | Partial: {partially} | Failed: {failed} | Avg: {avg_latency:.0f}ms")
+
+        # Show error details for failed trades
+        if failed_errors:
+            lines.append(f"  {'-' * 76}")
+            lines.append("  FAILED TRADE ERRORS:")
+            for err in failed_errors[:5]:  # Show first 5 errors
+                lines.append(err)
+
         lines.append(f"{'=' * 80}\n")
 
         return "\n".join(lines)
