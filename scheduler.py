@@ -51,6 +51,7 @@ from utils.trading_pipeline import TradingPipeline
 from agents.scanner_agent import ScannerAgent, UNIVERSES
 from utils.finviz_scanner import FinvizScanner
 from utils.news_analyzer import NewsAnalyzer
+from utils.fast_pipeline import FastPipeline, QueuedTrade
 
 logger = logging.getLogger("scheduler")
 
@@ -354,6 +355,164 @@ def run_finviz_cycle(
         logger.error("Finviz cycle %d failed: %s", cycle_number, e)
         print(f"--- Finviz Cycle #{cycle_number} FAILED: {e} ---\n")
         return []
+
+
+def run_scalp_cycle(
+    fast_pipeline: FastPipeline,
+    symbols: list[str],
+    timeframe: str,
+    cycle_number: int = 0,
+    execute: bool = True,
+) -> list:
+    """Run one fast scalping cycle with parallel processing.
+
+    Args:
+        fast_pipeline: FastPipeline instance
+        symbols: Stock tickers to analyze
+        timeframe: Bar timeframe (1Min, 5Min)
+        cycle_number: Cycle counter
+        execute: Whether to execute trades
+
+    Returns:
+        List of FastResult objects.
+    """
+    now = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
+    print(f"\n--- Scalp Cycle #{cycle_number} start: {now} ---")
+    print(f"    Timeframe: {timeframe} | Symbols: {len(symbols)}")
+
+    try:
+        results = fast_pipeline.run_fast(symbols, timeframe=timeframe, execute=execute)
+
+        # Print results
+        print(FastPipeline.format_results(results))
+
+        # Stats
+        buys = sum(1 for r in results if r.signal == "BUY")
+        sells = sum(1 for r in results if r.signal == "SELL")
+        executed = sum(1 for r in results if r.executed)
+        avg_latency = sum(r.latency_ms for r in results) / len(results) if results else 0
+
+        print(
+            f"--- Scalp Cycle #{cycle_number} complete: "
+            f"{buys} BUY / {sells} SELL / {executed} executed / "
+            f"avg {avg_latency:.0f}ms ---\n"
+        )
+
+        return results
+
+    except Exception as e:
+        logger.error("Scalp cycle %d failed: %s", cycle_number, e)
+        print(f"--- Scalp Cycle #{cycle_number} FAILED: {e} ---\n")
+        return []
+
+
+def run_premarket_scan(
+    fast_pipeline: FastPipeline,
+    symbols: list[str],
+    finviz_screen: str | None = None,
+    max_trades: int = 5,
+) -> list[QueuedTrade]:
+    """Run pre-market scan and queue trades for market open.
+
+    Args:
+        fast_pipeline: FastPipeline instance
+        symbols: Stock tickers to analyze (or use Finviz)
+        finviz_screen: Optional Finviz screen to get symbols
+        max_trades: Maximum trades to queue
+
+    Returns:
+        List of QueuedTrade objects.
+    """
+    print(f"\n{'=' * 62}")
+    print(f"  PRE-MARKET SCAN")
+    print(f"{'=' * 62}")
+
+    try:
+        # Get symbols from Finviz if specified
+        if finviz_screen:
+            finviz = FinvizScanner(min_price=5.0, max_price=500.0)
+            if finviz_screen == "BUY_CANDIDATES":
+                stocks = finviz.get_buy_candidates(limit=20)
+            else:
+                stocks = finviz.get_screen(finviz_screen, limit=20)
+
+            if stocks:
+                symbols = [s.symbol for s in stocks]
+                print(f"  Finviz {finviz_screen}: {len(symbols)} stocks")
+                print(FinvizScanner.format_results(stocks))
+
+        if not symbols:
+            print("  No symbols to scan")
+            return []
+
+        print(f"  Scanning {len(symbols)} symbols...")
+
+        # Run pre-market scan
+        queue = fast_pipeline.premarket_scan(symbols, timeframe="1Day")
+
+        # Limit queue size
+        queue = queue[:max_trades]
+
+        if queue:
+            print(FastPipeline.format_queue(queue))
+            print(f"  {len(queue)} trades queued for market open")
+        else:
+            print("  No actionable signals found")
+
+        print(f"{'=' * 62}\n")
+        return queue
+
+    except Exception as e:
+        logger.error("Pre-market scan failed: %s", e)
+        print(f"  ERROR: {e}")
+        return []
+
+
+def execute_queue_at_market_open(
+    fast_pipeline: FastPipeline,
+    queue: list[QueuedTrade],
+    client: AlpacaClient,
+    no_wait: bool = False,
+) -> list[QueuedTrade]:
+    """Wait for market open and execute queued trades immediately.
+
+    Args:
+        fast_pipeline: FastPipeline instance
+        queue: Trades to execute
+        client: Alpaca client
+        no_wait: Exit if market is closed
+
+    Returns:
+        List of executed trades.
+    """
+    if not queue:
+        print("No trades in queue")
+        return []
+
+    # Check if market is already open
+    clock = client.api.get_clock()
+    if clock.is_open:
+        print("Market is OPEN - executing queued trades immediately!")
+        return fast_pipeline.execute_queue_at_open(queue)
+
+    if no_wait:
+        print("Market is closed and --no-wait is set. Queue saved for later.")
+        return []
+
+    # Wait for market open
+    next_open = clock.next_open
+    now = clock.timestamp
+    wait_seconds = (next_open - now).total_seconds()
+
+    if wait_seconds > 0:
+        hours = int(wait_seconds // 3600)
+        minutes = int((wait_seconds % 3600) // 60)
+        print(f"\n  Market opens in {hours}h {minutes}m")
+        print(f"  {len(queue)} trades queued for immediate execution at open")
+        print(f"  Waiting...")
+
+    # Use the pipeline's wait and execute
+    return fast_pipeline.wait_and_execute_at_open(queue)
 
 
 # ── Market hours wait ────────────────────────────────────────────
@@ -683,6 +842,41 @@ def main():
         action="store_true",
         help="Only trade stocks with recent news/catalyst (implies --check-news)",
     )
+    # Scalping / HFT mode
+    parser.add_argument(
+        "--scalp",
+        action="store_true",
+        help="Enable fast scalping mode (parallel processing, 1Min bars, tighter stops)",
+    )
+    parser.add_argument(
+        "--scalp-interval",
+        type=int,
+        default=1,
+        help="Minutes between scalp cycles (default: 1)",
+    )
+    parser.add_argument(
+        "--scalp-workers",
+        type=int,
+        default=8,
+        help="Parallel worker threads for scalping (default: 8)",
+    )
+    # Pre-market scan mode
+    parser.add_argument(
+        "--premarket",
+        action="store_true",
+        help="Run pre-market scan and queue trades for market open",
+    )
+    parser.add_argument(
+        "--execute-at-open",
+        action="store_true",
+        help="Execute queued trades immediately when market opens (use with --premarket)",
+    )
+    parser.add_argument(
+        "--max-queued-trades",
+        type=int,
+        default=5,
+        help="Maximum trades to queue for market open (default: 5)",
+    )
     args = parser.parse_args()
 
     # Handle daemon management commands first
@@ -723,24 +917,42 @@ def main():
     close_eod = args.close_eod and not args.no_close_eod
     eod_minutes = args.eod_minutes
 
+    # Override timeframe for scalping if not explicitly set
+    if args.scalp and args.timeframe == "1Day":
+        args.timeframe = "1Min"  # Default to 1Min for scalping
+
     # Handle --require-news implying --check-news
     check_news = args.check_news or args.require_news
     require_news = args.require_news
 
     # Determine scan mode for banner
-    if args.finviz:
+    if args.premarket:
+        scan_mode = "PRE-MARKET SCAN"
+        if args.finviz:
+            scan_mode += f" + FINVIZ ({args.finviz_screen})"
+    elif args.scalp:
+        scan_mode = "SCALPING/HFT"
+        if args.finviz:
+            scan_mode += f" + FINVIZ ({args.finviz_screen})"
+    elif args.finviz:
         scan_mode = f"FINVIZ ({args.finviz_screen})"
     elif args.scan:
         scan_mode = f"SCANNER ({args.universe})"
     else:
         scan_mode = "FIXED SYMBOLS"
 
+    # Adjust interval for scalping
+    if args.scalp:
+        interval = args.scalp_interval
+
     print(f"\n{'=' * 62}")
     print(f"  AUTOMATED TRADING SCHEDULER")
     print(f"{'=' * 62}")
     print(f"  Mode         : {mode}")
     print(f"  Scan Mode    : {scan_mode}")
-    if not args.finviz and not args.scan:
+    if args.scalp:
+        print(f"  Scalp Workers: {args.scalp_workers} threads")
+    if not args.finviz and not args.scan and not args.premarket:
         print(f"  Symbols      : {', '.join(symbols)}")
     print(f"  Interval     : {interval} min")
     print(f"  Timeframe    : {args.timeframe}")
@@ -785,9 +997,55 @@ def main():
         event_bus=bus,
     )
 
+    # ── Build fast pipeline for scalping/premarket ─────────
+    fast_pipeline = None
+    if args.scalp or args.premarket:
+        fast_pipeline = FastPipeline(
+            client=client,
+            dry_run=dry_run,
+            max_workers=args.scalp_workers,
+            atr_multiplier_sl=1.0,  # Tighter stop loss
+            atr_multiplier_tp=1.5,  # Smaller profit target
+            max_position_pct=0.02,  # Smaller positions
+            min_score=0.1,
+        )
+
+    # ── Pre-market scan mode ─────────────────────────────────
+    if args.premarket:
+        # Get symbols to scan
+        scan_symbols = symbols if symbols else []
+        finviz_screen = args.finviz_screen if args.finviz else None
+
+        queue = run_premarket_scan(
+            fast_pipeline,
+            scan_symbols,
+            finviz_screen=finviz_screen,
+            max_trades=args.max_queued_trades,
+        )
+
+        if args.execute_at_open and queue:
+            executed = execute_queue_at_market_open(
+                fast_pipeline, queue, client, no_wait=no_wait
+            )
+            print(f"\nExecuted {len([t for t in executed if t.executed])} trades at market open")
+
+        return
+
     # ── Single-pass mode ─────────────────────────────────────
     if args.once:
-        if args.finviz:
+        if args.scalp:
+            # Get symbols from Finviz if specified
+            scan_symbols = symbols
+            if args.finviz:
+                finviz = FinvizScanner(min_price=5.0, max_price=500.0)
+                stocks = finviz.get_screen(args.finviz_screen, limit=20)
+                if stocks:
+                    scan_symbols = [s.symbol for s in stocks]
+            run_scalp_cycle(
+                fast_pipeline, scan_symbols, args.timeframe,
+                cycle_number=1, execute=not dry_run
+            )
+        elif args.finviz:
             run_finviz_cycle(
                 pipeline, args.finviz_screen, args.timeframe,
                 cycle_number=1, check_news=check_news, require_news=require_news
@@ -811,7 +1069,22 @@ def main():
 
         cycle += 1
 
-        if args.finviz:
+        if args.scalp:
+            # Get symbols from Finviz if specified
+            scan_symbols = symbols
+            if args.finviz:
+                try:
+                    finviz = FinvizScanner(min_price=5.0, max_price=500.0)
+                    stocks = finviz.get_screen(args.finviz_screen, limit=20)
+                    if stocks:
+                        scan_symbols = [s.symbol for s in stocks]
+                except Exception as e:
+                    logger.warning("Finviz scan failed, using default symbols: %s", e)
+            run_scalp_cycle(
+                fast_pipeline, scan_symbols, args.timeframe,
+                cycle_number=cycle, execute=not dry_run
+            )
+        elif args.finviz:
             run_finviz_cycle(
                 pipeline, args.finviz_screen, args.timeframe,
                 cycle_number=cycle, check_news=check_news, require_news=require_news
