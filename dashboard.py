@@ -1,21 +1,23 @@
 """Performance Dashboard
 
 Reads the trade journal CSV files and prints aggregate performance
-statistics.  No API keys required — works entirely from local data.
+statistics. Also connects to Alpaca API to show real-time P&L.
 
 Usage:
     python dashboard.py                    # full summary
     python dashboard.py --symbol AAPL      # filter to one symbol
     python dashboard.py --last 50          # only last 50 decisions
+    python dashboard.py --live             # show live account P&L
     python main.py --dashboard             # via main entry point
 
 Sections:
     1. Overview          — total decisions, signal breakdown, date range
-    2. Signal Accuracy   — per-agent hit rates (BUY/SELL vs HOLD)
-    3. Per-Symbol Stats  — breakdown by ticker
-    4. Order Summary     — executed orders, fill rate
-    5. Score Distribution — combined score histogram (text-based)
-    6. Recent Activity   — last N decisions
+    2. P&L Summary       — daily, cumulative, and per-position P&L
+    3. Signal Accuracy   — per-agent hit rates (BUY/SELL vs HOLD)
+    4. Per-Symbol Stats  — breakdown by ticker
+    5. Order Summary     — executed orders, fill rate
+    6. Score Distribution — combined score histogram (text-based)
+    7. Recent Activity   — last N decisions
 """
 
 import argparse
@@ -24,7 +26,7 @@ import logging
 import os
 import sys
 from collections import Counter, defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -47,6 +49,170 @@ def _safe_float(val: str, default: float = 0.0) -> float:
         return float(val)
     except (ValueError, TypeError):
         return default
+
+
+# ── P&L from Alpaca ──────────────────────────────────────────────
+
+
+def get_pnl_data() -> dict:
+    """Fetch P&L data from Alpaca API."""
+    try:
+        from utils.alpaca_client import AlpacaClient
+        client = AlpacaClient()
+
+        # Get account info
+        account = client.get_account()
+        equity = account.get("equity", 0)
+        last_equity = account.get("last_equity", equity)
+        cash = account.get("cash", 0)
+        buying_power = account.get("buying_power", 0)
+
+        # Calculate daily P&L
+        daily_pnl = equity - last_equity
+        daily_pnl_pct = (daily_pnl / last_equity * 100) if last_equity else 0
+
+        # Get positions for unrealized P&L
+        positions = client.get_positions()
+        unrealized_pnl = sum(float(p.get("unrealized_pl", 0)) for p in positions)
+        unrealized_pnl_pct = sum(float(p.get("unrealized_plpc", 0)) * 100 for p in positions) / len(positions) if positions else 0
+
+        # Get portfolio history for cumulative P&L
+        try:
+            history = client.api.get_portfolio_history(
+                period="1M",
+                timeframe="1D"
+            )
+
+            if history and hasattr(history, 'profit_loss'):
+                cumulative_pnl = sum(history.profit_loss) if history.profit_loss else 0
+                # Get starting equity from a month ago
+                if history.equity and len(history.equity) > 0:
+                    start_equity = history.equity[0]
+                    cumulative_pnl_pct = (cumulative_pnl / start_equity * 100) if start_equity else 0
+                else:
+                    cumulative_pnl_pct = 0
+
+                # Daily P&L history
+                daily_pnls = list(zip(history.timestamp, history.profit_loss)) if history.profit_loss else []
+            else:
+                cumulative_pnl = 0
+                cumulative_pnl_pct = 0
+                daily_pnls = []
+        except Exception as e:
+            logger.warning("Could not fetch portfolio history: %s", e)
+            cumulative_pnl = 0
+            cumulative_pnl_pct = 0
+            daily_pnls = []
+
+        return {
+            "equity": equity,
+            "last_equity": last_equity,
+            "cash": cash,
+            "buying_power": buying_power,
+            "daily_pnl": daily_pnl,
+            "daily_pnl_pct": daily_pnl_pct,
+            "unrealized_pnl": unrealized_pnl,
+            "unrealized_pnl_pct": unrealized_pnl_pct,
+            "cumulative_pnl": cumulative_pnl,
+            "cumulative_pnl_pct": cumulative_pnl_pct,
+            "positions": positions,
+            "daily_pnls": daily_pnls[-10:],  # Last 10 days
+            "connected": True,
+        }
+    except Exception as e:
+        logger.warning("Could not connect to Alpaca: %s", e)
+        return {"connected": False, "error": str(e)}
+
+
+def section_pnl(pnl_data: dict) -> str:
+    """P&L summary section."""
+    if not pnl_data.get("connected"):
+        return f"  Could not connect to Alpaca: {pnl_data.get('error', 'Unknown error')}\n"
+
+    lines = []
+
+    # Account overview
+    lines.append(f"  {'─' * 40}")
+    lines.append(f"  ACCOUNT")
+    lines.append(f"  {'─' * 40}")
+    lines.append(f"  Equity         : ${pnl_data['equity']:,.2f}")
+    lines.append(f"  Cash           : ${pnl_data['cash']:,.2f}")
+    lines.append(f"  Buying Power   : ${pnl_data['buying_power']:,.2f}")
+    lines.append("")
+
+    # P&L summary
+    lines.append(f"  {'─' * 40}")
+    lines.append(f"  PROFIT & LOSS")
+    lines.append(f"  {'─' * 40}")
+
+    daily = pnl_data['daily_pnl']
+    daily_pct = pnl_data['daily_pnl_pct']
+    daily_color = "+" if daily >= 0 else ""
+    lines.append(f"  Today's P&L    : {daily_color}${daily:,.2f} ({daily_color}{daily_pct:.2f}%)")
+
+    unrealized = pnl_data['unrealized_pnl']
+    unrealized_color = "+" if unrealized >= 0 else ""
+    lines.append(f"  Unrealized P&L : {unrealized_color}${unrealized:,.2f}")
+
+    cumulative = pnl_data['cumulative_pnl']
+    cumulative_pct = pnl_data['cumulative_pnl_pct']
+    cumulative_color = "+" if cumulative >= 0 else ""
+    lines.append(f"  Cumulative (1M): {cumulative_color}${cumulative:,.2f} ({cumulative_color}{cumulative_pct:.2f}%)")
+    lines.append("")
+
+    # Position P&L
+    positions = pnl_data.get('positions', [])
+    if positions:
+        lines.append(f"  {'─' * 40}")
+        lines.append(f"  POSITIONS ({len(positions)})")
+        lines.append(f"  {'─' * 40}")
+        lines.append(f"  {'Symbol':8s} {'Qty':>7s} {'Entry':>10s} {'Current':>10s} {'P&L':>12s} {'%':>8s}")
+        lines.append(f"  {'-' * 57}")
+
+        for p in positions:
+            symbol = p.get('symbol', '?')
+            qty = int(float(p.get('qty', 0)))
+            avg_entry = float(p.get('avg_entry_price', 0))
+            current = float(p.get('current_price', 0))
+            pnl = float(p.get('unrealized_pl', 0))
+            pnl_pct = float(p.get('unrealized_plpc', 0)) * 100
+            pnl_sign = "+" if pnl >= 0 else ""
+
+            lines.append(
+                f"  {symbol:8s} {qty:>7d} ${avg_entry:>9.2f} ${current:>9.2f} "
+                f"{pnl_sign}${pnl:>10.2f} {pnl_sign}{pnl_pct:>6.2f}%"
+            )
+
+        total_pnl = sum(float(p.get('unrealized_pl', 0)) for p in positions)
+        total_sign = "+" if total_pnl >= 0 else ""
+        lines.append(f"  {'-' * 57}")
+        lines.append(f"  {'TOTAL':8s} {'':<7s} {'':<10s} {'':<10s} {total_sign}${total_pnl:>10.2f}")
+        lines.append("")
+
+    # Daily P&L history
+    daily_pnls = pnl_data.get('daily_pnls', [])
+    if daily_pnls:
+        lines.append(f"  {'─' * 40}")
+        lines.append(f"  DAILY P&L HISTORY (Last {len(daily_pnls)} days)")
+        lines.append(f"  {'─' * 40}")
+
+        running_total = 0
+        for ts, pnl in daily_pnls:
+            date = datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
+            running_total += pnl
+            pnl_sign = "+" if pnl >= 0 else ""
+            cum_sign = "+" if running_total >= 0 else ""
+
+            # Simple bar chart
+            bar_len = min(abs(int(pnl / 10)), 20)
+            if pnl >= 0:
+                bar = "█" * bar_len
+            else:
+                bar = "░" * bar_len
+
+            lines.append(f"  {date}  {pnl_sign}${pnl:>8.2f}  {bar:20s}  Cum: {cum_sign}${running_total:>10.2f}")
+
+    return "\n".join(lines) + "\n"
 
 
 # ── Dashboard sections ───────────────────────────────────────────
@@ -254,6 +420,7 @@ def render_dashboard(
     journal_dir: str = DEFAULT_JOURNAL_DIR,
     symbol: str | None = None,
     last: int = 10,
+    show_live: bool = True,
 ) -> str:
     """Build the full dashboard string."""
     jdir = Path(journal_dir)
@@ -279,28 +446,44 @@ def render_dashboard(
         f"  1. OVERVIEW",
         f"{'─' * 62}",
         section_overview(decisions),
+    ]
+
+    # Add P&L section if live mode is enabled
+    if show_live:
+        pnl_data = get_pnl_data()
+        sections.extend([
+            f"{'─' * 62}",
+            f"  2. P&L SUMMARY (LIVE)",
+            f"{'─' * 62}",
+            section_pnl(pnl_data),
+        ])
+        next_section = 3
+    else:
+        next_section = 2
+
+    sections.extend([
         f"{'─' * 62}",
-        f"  2. AGENT SIGNALS",
+        f"  {next_section}. AGENT SIGNALS",
         f"{'─' * 62}",
         section_signal_accuracy(signals),
         f"{'─' * 62}",
-        f"  3. PER-SYMBOL STATS",
+        f"  {next_section + 1}. PER-SYMBOL STATS",
         f"{'─' * 62}",
         section_per_symbol(decisions),
         f"{'─' * 62}",
-        f"  4. ORDERS",
+        f"  {next_section + 2}. ORDERS",
         f"{'─' * 62}",
         section_orders(orders),
         f"{'─' * 62}",
-        f"  5. SCORE DISTRIBUTION",
+        f"  {next_section + 3}. SCORE DISTRIBUTION",
         f"{'─' * 62}",
         section_score_distribution(decisions),
         f"{'─' * 62}",
-        f"  6. RECENT ACTIVITY (last {last})",
+        f"  {next_section + 4}. RECENT ACTIVITY (last {last})",
         f"{'─' * 62}",
         section_recent(decisions, n=last),
         f"{'#' * 62}\n",
-    ]
+    ])
 
     return "\n".join(sections)
 
@@ -323,12 +506,26 @@ def main():
         default=10,
         help="Number of recent decisions to show (default: 10)",
     )
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        default=True,
+        help="Show live P&L from Alpaca (default: True)",
+    )
+    parser.add_argument(
+        "--no-live",
+        action="store_true",
+        help="Skip live P&L section (use if no API keys)",
+    )
     args = parser.parse_args()
+
+    show_live = args.live and not args.no_live
 
     print(render_dashboard(
         journal_dir=args.journal_dir,
         symbol=args.symbol,
         last=args.last,
+        show_live=show_live,
     ))
 
 
