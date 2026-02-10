@@ -199,6 +199,17 @@ class FastPipeline:
 
             result.price = float(df["close"].iloc[-1])
 
+            # Handle $0 price edge case - try real-time fallback
+            if result.price <= 0:
+                realtime_price = client.get_price_quick(symbol)
+                if realtime_price and realtime_price > 0:
+                    result.price = realtime_price
+                    logger.debug("Used real-time price for %s: $%.2f", symbol, result.price)
+                else:
+                    result.error = "Invalid price data (zero)"
+                    result.latency_ms = (datetime.now(timezone.utc) - start).total_seconds() * 1000
+                    return result
+
             # Use scalping indicators for fast signals
             if self.use_scalp_indicators:
                 scalp = self._ensure_scalp_indicators()
@@ -273,6 +284,9 @@ class FastPipeline:
         *,
         timeframe: str = "1Min",
         execute: bool = True,
+        validate_symbols: bool = True,
+        min_price: float = 1.0,
+        min_volume: int = 10000,
     ) -> list[FastResult]:
         """Run fast parallel analysis on multiple symbols.
 
@@ -280,12 +294,34 @@ class FastPipeline:
             symbols: List of stock tickers
             timeframe: Bar timeframe (default 1Min for scalping)
             execute: Whether to execute trades
+            validate_symbols: Whether to filter out non-tradeable symbols first
+            min_price: Minimum stock price (default $1)
+            min_volume: Minimum daily volume (default 10k shares)
 
         Returns:
             List of FastResult objects
         """
         self._ensure_client()
         start_time = datetime.now(timezone.utc)
+
+        # Validate symbols first to filter out non-tradeable ones
+        original_count = len(symbols)
+        if validate_symbols and symbols:
+            symbols = self.client.validate_symbols(
+                symbols,
+                min_price=min_price,
+                min_volume=min_volume,
+                check_price_data=True,
+            )
+            if len(symbols) < original_count:
+                logger.info(
+                    "Symbol validation filtered %d -> %d stocks",
+                    original_count, len(symbols)
+                )
+
+        if not symbols:
+            logger.warning("No valid symbols to analyze after filtering")
+            return []
 
         # Get account equity
         try:
@@ -362,6 +398,9 @@ class FastPipeline:
         symbols: list[str],
         *,
         timeframe: str = "1Day",  # Use daily for pre-market analysis
+        validate_symbols: bool = True,
+        min_price: float = 1.0,
+        min_volume: int = 10000,
     ) -> list[QueuedTrade]:
         """Scan stocks before market open and queue trades.
 
@@ -371,12 +410,33 @@ class FastPipeline:
         Args:
             symbols: List of stock tickers to scan
             timeframe: Timeframe for analysis (default 1Day)
+            validate_symbols: Whether to filter out non-tradeable symbols first
+            min_price: Minimum stock price (default $1)
+            min_volume: Minimum daily volume (default 10k shares)
 
         Returns:
             List of QueuedTrade objects ready for execution
         """
         self._ensure_client()
         logger.info("Pre-market scan: analyzing %d symbols", len(symbols))
+
+        # Validate symbols first
+        if validate_symbols and symbols:
+            original_count = len(symbols)
+            symbols = self.client.validate_symbols(
+                symbols,
+                min_price=min_price,
+                min_volume=min_volume,
+                check_price_data=True,
+            )
+            logger.info(
+                "Pre-market validation: %d -> %d valid symbols",
+                original_count, len(symbols)
+            )
+
+        if not symbols:
+            logger.warning("No valid symbols to scan")
+            return []
 
         # Get account equity
         try:

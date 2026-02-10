@@ -252,3 +252,137 @@ class AlpacaClient:
                 "PLTR", "INTC", "BAC", "F", "T", "PFE", "AAL", "NIO",
                 "SNAP", "UBER", "HOOD", "RBLX", "DKNG", "LCID", "RIVN",
             ][:limit]
+
+    # ── Symbol Validation ──────────────────────────────────────
+
+    _tradeable_cache: dict[str, bool] = {}
+    _asset_cache: dict[str, object] = {}
+
+    def is_tradeable(self, symbol: str) -> bool:
+        """Check if a symbol is tradeable on Alpaca.
+
+        Returns True if:
+        - Asset exists and is active
+        - Asset is tradable (not halted)
+        - Not an OTC or weird ticker format
+
+        Results are cached to avoid repeated API calls.
+        """
+        # Check cache first
+        if symbol in self._tradeable_cache:
+            return self._tradeable_cache[symbol]
+
+        try:
+            asset = self.api.get_asset(symbol)
+            is_valid = (
+                asset.status == "active"
+                and asset.tradable
+                and "." not in symbol  # Filter OTC-style tickers
+                and len(symbol) <= 5  # Filter weird long tickers
+            )
+            self._tradeable_cache[symbol] = is_valid
+            self._asset_cache[symbol] = asset
+            return is_valid
+        except Exception as e:
+            logger.debug("Asset check failed for %s: %s", symbol, e)
+            self._tradeable_cache[symbol] = False
+            return False
+
+    def validate_symbols(
+        self,
+        symbols: list[str],
+        *,
+        min_price: float = 1.0,
+        max_price: float = 10000.0,
+        min_volume: int = 10000,
+        check_price_data: bool = True,
+    ) -> list[str]:
+        """Validate and filter a list of symbols for trading.
+
+        Args:
+            symbols: List of ticker symbols to validate
+            min_price: Minimum stock price (default $1)
+            max_price: Maximum stock price (default $10000)
+            min_volume: Minimum daily volume (default 10k shares)
+            check_price_data: Whether to verify price data exists
+
+        Returns:
+            List of valid, tradeable symbols
+        """
+        valid_symbols = []
+        rejected = {"not_tradeable": [], "bad_price": [], "low_volume": [], "no_data": []}
+
+        for symbol in symbols:
+            # Skip obviously bad symbols
+            if not symbol or len(symbol) > 5 or "." in symbol:
+                rejected["not_tradeable"].append(symbol)
+                continue
+
+            # Check if tradeable on Alpaca
+            if not self.is_tradeable(symbol):
+                rejected["not_tradeable"].append(symbol)
+                continue
+
+            # Check price data if requested
+            if check_price_data:
+                try:
+                    bars = self.get_bars(symbol, timeframe="1Day", limit=5)
+                    if bars.empty:
+                        rejected["no_data"].append(symbol)
+                        continue
+
+                    price = float(bars["close"].iloc[-1])
+                    volume = float(bars["volume"].iloc[-1])
+
+                    # Price filter
+                    if price < min_price or price > max_price:
+                        rejected["bad_price"].append(f"{symbol}(${price:.2f})")
+                        continue
+
+                    # Volume filter
+                    if volume < min_volume:
+                        rejected["low_volume"].append(f"{symbol}({int(volume)})")
+                        continue
+
+                except Exception as e:
+                    logger.debug("Price check failed for %s: %s", symbol, e)
+                    rejected["no_data"].append(symbol)
+                    continue
+
+            valid_symbols.append(symbol)
+
+        # Log summary
+        if rejected["not_tradeable"]:
+            logger.info("Rejected (not tradeable): %s", ", ".join(rejected["not_tradeable"][:10]))
+        if rejected["bad_price"]:
+            logger.info("Rejected (price): %s", ", ".join(rejected["bad_price"][:10]))
+        if rejected["low_volume"]:
+            logger.info("Rejected (low volume): %s", ", ".join(rejected["low_volume"][:10]))
+        if rejected["no_data"]:
+            logger.info("Rejected (no data): %s", ", ".join(rejected["no_data"][:10]))
+
+        logger.info("Symbol validation: %d/%d passed", len(valid_symbols), len(symbols))
+        return valid_symbols
+
+    def get_price_quick(self, symbol: str) -> float | None:
+        """Get current price quickly, returns None if unavailable."""
+        try:
+            quote = self.api.get_latest_quote(symbol)
+            # Use midpoint of bid/ask for most accurate price
+            bid = float(quote.bp) if quote.bp else 0
+            ask = float(quote.ap) if quote.ap else 0
+            if bid > 0 and ask > 0:
+                return (bid + ask) / 2
+            elif ask > 0:
+                return ask
+            elif bid > 0:
+                return bid
+
+            # Fallback to last trade
+            trade = self.api.get_latest_trade(symbol)
+            if trade:
+                return float(trade.p)
+            return None
+        except Exception as e:
+            logger.debug("Quick price failed for %s: %s", symbol, e)
+            return None

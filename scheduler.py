@@ -365,6 +365,9 @@ def run_scalp_cycle(
     cycle_number: int = 0,
     execute: bool = True,
     scalp_manager: ScalpingManager | None = None,
+    validate_symbols: bool = True,
+    min_price: float = 1.0,
+    min_volume: int = 10000,
 ) -> list:
     """Run one fast scalping cycle with parallel processing.
 
@@ -375,6 +378,9 @@ def run_scalp_cycle(
         cycle_number: Cycle counter
         execute: Whether to execute trades
         scalp_manager: Optional ScalpingManager for position tracking
+        validate_symbols: Whether to filter out non-tradeable symbols first
+        min_price: Minimum stock price (default $1)
+        min_volume: Minimum daily volume (default 10k shares)
 
     Returns:
         List of FastResult objects.
@@ -384,7 +390,14 @@ def run_scalp_cycle(
     print(f"    Timeframe: {timeframe} | Symbols: {len(symbols)}")
 
     try:
-        results = fast_pipeline.run_fast(symbols, timeframe=timeframe, execute=execute)
+        results = fast_pipeline.run_fast(
+            symbols,
+            timeframe=timeframe,
+            execute=execute,
+            validate_symbols=validate_symbols,
+            min_price=min_price,
+            min_volume=min_volume,
+        )
 
         # Print results
         print(FastPipeline.format_results(results))
@@ -898,6 +911,24 @@ def main():
         default=5,
         help="Maximum trades to queue for market open (default: 5)",
     )
+    # Symbol validation options
+    parser.add_argument(
+        "--no-validate",
+        action="store_true",
+        help="Skip symbol validation (faster but may cause failed trades)",
+    )
+    parser.add_argument(
+        "--min-price",
+        type=float,
+        default=1.0,
+        help="Minimum stock price filter (default: $1.00)",
+    )
+    parser.add_argument(
+        "--min-volume",
+        type=int,
+        default=10000,
+        help="Minimum daily volume filter (default: 10,000 shares)",
+    )
     args = parser.parse_args()
 
     # Handle daemon management commands first
@@ -974,6 +1005,8 @@ def main():
     if args.scalp:
         print(f"  Scalp Workers: {args.scalp_workers} threads")
         print(f"  Interval     : {interval} sec")
+        validate_str = "OFF" if args.no_validate else f"ON (>=${args.min_price:.2f}, vol>{args.min_volume:,})"
+        print(f"  Validation   : {validate_str}")
     else:
         print(f"  Interval     : {interval} min")
     if not args.finviz and not args.scan and not args.premarket:
@@ -1082,7 +1115,10 @@ def main():
             run_scalp_cycle(
                 fast_pipeline, scan_symbols, args.timeframe,
                 cycle_number=1, execute=not dry_run,
-                scalp_manager=scalp_manager
+                scalp_manager=scalp_manager,
+                validate_symbols=not args.no_validate,
+                min_price=args.min_price,
+                min_volume=args.min_volume,
             )
         elif args.finviz:
             run_finviz_cycle(
@@ -1122,7 +1158,10 @@ def main():
             run_scalp_cycle(
                 fast_pipeline, scan_symbols, args.timeframe,
                 cycle_number=cycle, execute=not dry_run,
-                scalp_manager=scalp_manager
+                scalp_manager=scalp_manager,
+                validate_symbols=not args.no_validate,
+                min_price=args.min_price,
+                min_volume=args.min_volume,
             )
 
             # Show scalp stats periodically
