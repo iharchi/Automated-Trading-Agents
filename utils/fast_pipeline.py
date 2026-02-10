@@ -27,6 +27,7 @@ from typing import Optional
 from utils.alpaca_client import AlpacaClient
 from utils.position_sizer import PositionSizer
 from utils.market_regime import MarketRegimeDetector
+from utils.scalping_indicators import ScalpingIndicators, ScalpSignal
 
 from agents.technical_analysis_agent import TechnicalAnalysisAgent
 from agents.risk_management_agent import RiskManagementAgent
@@ -85,6 +86,12 @@ class FastPipeline:
         min_score: float = 0.1,  # Minimum score to trade
         skip_regime: bool = True,  # Skip regime for speed
         skip_correlation: bool = True,  # Skip correlation for speed
+        # Scalping-specific settings
+        use_scalp_indicators: bool = True,  # Use VWAP/momentum indicators
+        profit_target_pct: float = 0.5,  # 0.5% profit target
+        stop_loss_pct: float = 0.25,  # 0.25% stop loss
+        vwap_entry_std: float = 1.5,  # Enter at 1.5 std from VWAP
+        volume_spike_mult: float = 1.5,  # Volume must be 1.5x avg
     ):
         self.client = client
         self.dry_run = dry_run
@@ -95,9 +102,15 @@ class FastPipeline:
         self.min_score = min_score
         self.skip_regime = skip_regime
         self.skip_correlation = skip_correlation
+        self.use_scalp_indicators = use_scalp_indicators
+        self.profit_target_pct = profit_target_pct
+        self.stop_loss_pct = stop_loss_pct
+        self.vwap_entry_std = vwap_entry_std
+        self.volume_spike_mult = volume_spike_mult
 
         # Lazy-loaded components
         self._ta_agent = None
+        self._scalp_indicators = None
         self._risk_agent = None
         self._exec_agent = None
         self._sizer = None
@@ -121,6 +134,17 @@ class FastPipeline:
                 auto_trade=False,
             )
         return self._ta_agent
+
+    def _ensure_scalp_indicators(self):
+        """Lazy load scalping indicators."""
+        if self._scalp_indicators is None:
+            self._scalp_indicators = ScalpingIndicators(
+                vwap_std_entry=self.vwap_entry_std,
+                profit_target_pct=self.profit_target_pct,
+                stop_loss_pct=self.stop_loss_pct,
+                volume_spike_mult=self.volume_spike_mult,
+            )
+        return self._scalp_indicators
 
     def _ensure_sizer(self):
         """Lazy load position sizer with scalping settings."""
@@ -164,37 +188,73 @@ class FastPipeline:
         result = FastResult(symbol=symbol)
 
         try:
-            # Step 1: Technical Analysis only (skip sentiment for speed)
-            ta = self._ensure_ta()
-            ta_result = ta.analyze(symbol, timeframe=timeframe)
+            # Get price data
+            client = self._ensure_client()
+            df = client.get_bars(symbol, timeframe=timeframe, limit=100)
 
-            result.price = ta_result.get("current_price", 0)
-            atr = ta_result.get("atr", 0)
-            result.score = ta_result.get("composite_score", 0)
-
-            # Determine signal
-            if result.score >= self.min_score:
-                result.signal = "BUY"
-            elif result.score <= -self.min_score:
-                result.signal = "SELL"
-            else:
-                result.signal = "HOLD"
+            if df.empty or len(df) < 30:
+                result.error = "Insufficient data"
                 result.latency_ms = (datetime.now(timezone.utc) - start).total_seconds() * 1000
                 return result
 
-            # Step 2: Quick position sizing
-            sizer = self._ensure_sizer()
-            sizing = sizer.calculate(
-                symbol,
-                price=result.price,
-                equity=equity,
-                signal=result.signal,
-                atr=atr,
-            )
+            result.price = float(df["close"].iloc[-1])
 
-            result.shares = sizing.shares
-            result.stop_loss = sizing.stop_loss
-            result.take_profit = sizing.take_profit
+            # Use scalping indicators for fast signals
+            if self.use_scalp_indicators:
+                scalp = self._ensure_scalp_indicators()
+                scalp_signal = scalp.analyze(df, symbol=symbol)
+
+                result.signal = scalp_signal.signal
+                result.score = scalp_signal.strength
+                result.stop_loss = scalp_signal.stop_loss
+                result.take_profit = scalp_signal.target_price
+
+                if result.signal == "HOLD":
+                    result.latency_ms = (datetime.now(timezone.utc) - start).total_seconds() * 1000
+                    return result
+
+                # Calculate shares based on fixed % of equity for scalping
+                risk_amount = equity * (self.stop_loss_pct / 100)
+                price_risk = abs(result.price - result.stop_loss)
+                if price_risk > 0:
+                    result.shares = int(risk_amount / price_risk)
+                    # Cap at max position size
+                    max_shares = int(equity * self.max_position_pct / result.price)
+                    result.shares = min(result.shares, max_shares)
+                else:
+                    result.shares = 0
+
+            else:
+                # Fall back to regular TA analysis
+                ta = self._ensure_ta()
+                ta_result = ta.analyze(symbol, timeframe=timeframe)
+
+                atr = ta_result.get("atr", 0)
+                result.score = ta_result.get("composite_score", 0)
+
+                # Determine signal
+                if result.score >= self.min_score:
+                    result.signal = "BUY"
+                elif result.score <= -self.min_score:
+                    result.signal = "SELL"
+                else:
+                    result.signal = "HOLD"
+                    result.latency_ms = (datetime.now(timezone.utc) - start).total_seconds() * 1000
+                    return result
+
+                # Quick position sizing
+                sizer = self._ensure_sizer()
+                sizing = sizer.calculate(
+                    symbol,
+                    price=result.price,
+                    equity=equity,
+                    signal=result.signal,
+                    atr=atr,
+                )
+
+                result.shares = sizing.shares
+                result.stop_loss = sizing.stop_loss
+                result.take_profit = sizing.take_profit
 
             if result.shares == 0:
                 result.signal = "HOLD"

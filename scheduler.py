@@ -52,6 +52,7 @@ from agents.scanner_agent import ScannerAgent, UNIVERSES
 from utils.finviz_scanner import FinvizScanner
 from utils.news_analyzer import NewsAnalyzer
 from utils.fast_pipeline import FastPipeline, QueuedTrade
+from utils.scalping_manager import ScalpingManager, ScalpPosition
 
 logger = logging.getLogger("scheduler")
 
@@ -363,6 +364,7 @@ def run_scalp_cycle(
     timeframe: str,
     cycle_number: int = 0,
     execute: bool = True,
+    scalp_manager: ScalpingManager | None = None,
 ) -> list:
     """Run one fast scalping cycle with parallel processing.
 
@@ -372,6 +374,7 @@ def run_scalp_cycle(
         timeframe: Bar timeframe (1Min, 5Min)
         cycle_number: Cycle counter
         execute: Whether to execute trades
+        scalp_manager: Optional ScalpingManager for position tracking
 
     Returns:
         List of FastResult objects.
@@ -385,6 +388,24 @@ def run_scalp_cycle(
 
         # Print results
         print(FastPipeline.format_results(results))
+
+        # Track executed trades in scalp manager
+        if scalp_manager and execute:
+            for r in results:
+                if r.executed and r.signal in ("BUY", "SELL"):
+                    side = "long" if r.signal == "BUY" else "short"
+                    scalp_manager.add_position(
+                        symbol=r.symbol,
+                        side=side,
+                        entry_price=r.price,
+                        qty=r.shares,
+                        stop_loss=r.stop_loss,
+                        take_profit=r.take_profit,
+                    )
+
+            # Show open positions
+            if scalp_manager.get_all_positions():
+                print(scalp_manager.format_positions())
 
         # Stats
         buys = sum(1 for r in results if r.signal == "BUY")
@@ -999,6 +1020,7 @@ def main():
 
     # ── Build fast pipeline for scalping/premarket ─────────
     fast_pipeline = None
+    scalp_manager = None
     if args.scalp or args.premarket:
         fast_pipeline = FastPipeline(
             client=client,
@@ -1008,7 +1030,21 @@ def main():
             atr_multiplier_tp=1.5,  # Smaller profit target
             max_position_pct=0.02,  # Smaller positions
             min_score=0.1,
+            # Scalping-specific
+            use_scalp_indicators=True,
+            profit_target_pct=0.5,  # 0.5% profit target
+            stop_loss_pct=0.25,  # 0.25% stop loss
         )
+        # Create scalping position manager
+        scalp_manager = ScalpingManager(
+            client=client,
+            check_interval=1.0,  # Check every 1 second
+            max_hold_minutes=30,  # Max 30 min hold time
+            trailing_lock_pct=0.3,  # Lock 30% of gains
+            dry_run=dry_run,
+        )
+        scalp_manager.start_monitoring()
+        print("  Scalp Manager: Position monitoring active")
 
     # ── Pre-market scan mode ─────────────────────────────────
     if args.premarket:
@@ -1043,7 +1079,8 @@ def main():
                     scan_symbols = [s.symbol for s in stocks]
             run_scalp_cycle(
                 fast_pipeline, scan_symbols, args.timeframe,
-                cycle_number=1, execute=not dry_run
+                cycle_number=1, execute=not dry_run,
+                scalp_manager=scalp_manager
             )
         elif args.finviz:
             run_finviz_cycle(
@@ -1082,8 +1119,14 @@ def main():
                     logger.warning("Finviz scan failed, using default symbols: %s", e)
             run_scalp_cycle(
                 fast_pipeline, scan_symbols, args.timeframe,
-                cycle_number=cycle, execute=not dry_run
+                cycle_number=cycle, execute=not dry_run,
+                scalp_manager=scalp_manager
             )
+
+            # Show scalp stats periodically
+            if cycle % 10 == 0 and scalp_manager:
+                print(scalp_manager.format_stats())
+
         elif args.finviz:
             run_finviz_cycle(
                 pipeline, args.finviz_screen, args.timeframe,
@@ -1125,6 +1168,13 @@ def main():
         while sleep_seconds > 0 and not _shutdown:
             time.sleep(min(sleep_seconds, 10))
             sleep_seconds -= 10
+
+    # Cleanup scalp manager
+    if scalp_manager:
+        print("\nClosing scalp positions...")
+        scalp_manager.exit_all(reason="shutdown")
+        scalp_manager.stop_monitoring()
+        print(scalp_manager.format_stats())
 
     print(f"\nScheduler stopped after {cycle} cycle(s).")
 
