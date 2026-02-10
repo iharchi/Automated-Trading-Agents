@@ -758,6 +758,9 @@ class TradingPipeline:
                 "confidence": agg.confidence,
             }
 
+            # Debug: Show we're about to execute
+            print(f"  >>> EXECUTING: {symbol} {agg.signal} {final_shares} shares @ ${price:.2f}")
+
             # Journal the decision
             if self.journal and self.enable_journal:
                 self.journal.log_decision(decision)
