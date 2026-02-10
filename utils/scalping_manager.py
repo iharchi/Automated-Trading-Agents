@@ -68,10 +68,10 @@ class ScalpingManager:
         self,
         client: AlpacaClient | None = None,
         *,
-        check_interval: float = 1.0,  # Check positions every 1 second
-        max_hold_minutes: int = 30,  # Max time to hold a position
-        trailing_lock_pct: float = 0.3,  # Lock in 30% of gains with trailing
-        min_profit_to_trail: float = 0.2,  # Start trailing at 0.2% profit
+        check_interval: float = 0.5,  # Check positions every 0.5 seconds (faster reaction)
+        max_hold_minutes: int = 5,  # Max 5 min hold for true scalping
+        trailing_lock_pct: float = 0.50,  # Lock in gains 0.5% below highs
+        min_profit_to_trail: float = 0.50,  # Start trailing at 0.5% profit (meaningful gain)
         dry_run: bool = False,
         on_exit: Callable[[ScalpPosition], None] | None = None,
     ):
@@ -187,17 +187,36 @@ class ScalpingManager:
         if pos.side == "short" and price <= pos.take_profit:
             return "take_profit"
 
-        # Trailing stop (lock in profits)
+        # Trailing stop (lock in profits) - only after meaningful gain
         if pos.unrealized_pnl_pct >= self.min_profit_to_trail:
             # Calculate trailing stop level
             if pos.side == "long":
                 trail_stop = pos.high_price * (1 - self.trailing_lock_pct / 100)
-                if price <= trail_stop and pos.high_price > pos.entry_price * 1.002:
+                # Only trail if we've made real progress (0.5% above entry)
+                if price <= trail_stop and pos.high_price > pos.entry_price * 1.005:
                     return "trailing_stop"
             else:
                 trail_stop = pos.low_price * (1 + self.trailing_lock_pct / 100)
-                if price >= trail_stop and pos.low_price < pos.entry_price * 0.998:
+                # Only trail if we've made real progress (0.5% below entry for short)
+                if price >= trail_stop and pos.low_price < pos.entry_price * 0.995:
                     return "trailing_stop"
+
+        # Aggressive profit protection at 80% of target
+        # If we're close to target, tighten stop to lock in gains
+        target_distance = abs(pos.take_profit - pos.entry_price)
+        current_distance = abs(price - pos.entry_price)
+        if target_distance > 0:
+            progress_to_target = current_distance / target_distance
+            if progress_to_target >= 0.80:  # 80% to target
+                # Use tight 0.15% trailing stop when close to target
+                if pos.side == "long":
+                    tight_trail = pos.high_price * 0.9985  # 0.15% from high
+                    if price <= tight_trail:
+                        return "profit_lock"
+                else:
+                    tight_trail = pos.low_price * 1.0015  # 0.15% from low
+                    if price >= tight_trail:
+                        return "profit_lock"
 
         # Time-based exit
         hold_time = datetime.now(timezone.utc) - pos.entry_time

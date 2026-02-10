@@ -48,15 +48,15 @@ class ScalpingIndicators:
         *,
         vwap_std_entry: float = 1.5,      # Enter when price is X std from VWAP
         vwap_std_exit: float = 0.5,       # Exit when price returns to X std
-        momentum_period: int = 5,          # Fast momentum lookback
-        rsi_period: int = 7,              # Fast RSI
-        rsi_oversold: int = 25,           # More extreme for scalping
-        rsi_overbought: int = 75,
-        volume_spike_mult: float = 2.0,   # Volume must be 2x average
+        momentum_period: int = 8,          # Slightly longer momentum lookback (less whipsaw)
+        rsi_period: int = 9,              # Slightly longer RSI (more reliable)
+        rsi_oversold: int = 30,           # Less extreme (more signals)
+        rsi_overbought: int = 70,
+        volume_spike_mult: float = 1.5,   # Volume must be 1.5x average (more signals)
         min_spread_pct: float = 0.05,     # Minimum spread to trade
         max_spread_pct: float = 0.50,     # Maximum spread (avoid illiquid)
-        profit_target_pct: float = 0.75,  # 0.75% profit target
-        stop_loss_pct: float = 0.50,      # 0.50% stop loss (1.5:1 R:R, wider for execution)
+        profit_target_pct: float = 0.40,  # 0.40% profit target (quick exits)
+        stop_loss_pct: float = 0.75,      # 0.75% stop loss (R:R ~1.9:1 with slippage)
     ):
         self.vwap_std_entry = vwap_std_entry
         self.vwap_std_exit = vwap_std_exit
@@ -298,13 +298,14 @@ class ScalpingIndicators:
             buy_weight *= 1.2
             sell_weight *= 1.2
 
-        # Determine final signal
-        if buy_weight > sell_weight and buy_weight >= 0.3:
+        # Determine final signal (require 0.35 weight for better confirmation)
+        min_signal_weight = 0.35
+        if buy_weight > sell_weight and buy_weight >= min_signal_weight:
             final_signal = "BUY"
             strength = min(buy_weight, 1.0)
             target = current_price * (1 + self.profit_target_pct / 100)
             stop = current_price * (1 - self.stop_loss_pct / 100)
-        elif sell_weight > buy_weight and sell_weight >= 0.3:
+        elif sell_weight > buy_weight and sell_weight >= min_signal_weight:
             final_signal = "SELL"
             strength = -min(sell_weight, 1.0)
             target = current_price * (1 - self.profit_target_pct / 100)
@@ -315,7 +316,10 @@ class ScalpingIndicators:
             target = current_price
             stop = current_price
 
-        confidence = abs(buy_weight - sell_weight) / max(buy_weight + sell_weight, 0.01)
+        # Confidence based on signal strength and agreement between indicators
+        dominant_weight = max(buy_weight, sell_weight)
+        weight_diff = abs(buy_weight - sell_weight)
+        confidence = min(dominant_weight * 0.7 + weight_diff * 0.3, 1.0)
 
         return ScalpSignal(
             symbol=symbol,

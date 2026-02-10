@@ -885,8 +885,8 @@ def main():
     parser.add_argument(
         "--scalp-interval",
         type=int,
-        default=30,
-        help="Seconds between scalp cycles (default: 30)",
+        default=15,
+        help="Seconds between scalp cycles (default: 15)",
     )
     parser.add_argument(
         "--scalp-workers",
@@ -1061,21 +1061,23 @@ def main():
             client=client,
             dry_run=dry_run,
             max_workers=args.scalp_workers,
-            atr_multiplier_sl=1.0,  # Tighter stop loss
-            atr_multiplier_tp=1.5,  # Smaller profit target
-            max_position_pct=0.02,  # Smaller positions
-            min_score=0.1,
-            # Scalping-specific
+            atr_multiplier_sl=1.5,  # Wider stop loss for volatility
+            atr_multiplier_tp=1.0,  # Tighter profit target
+            max_position_pct=0.08,  # 8% per position (meaningful trades)
+            min_score=0.15,  # Higher threshold for better signals
+            # Scalping-specific (optimized for profit preservation)
             use_scalp_indicators=True,
-            profit_target_pct=0.75,  # 0.75% profit target
-            stop_loss_pct=0.50,  # 0.50% stop loss (wider for execution delays)
+            profit_target_pct=0.40,  # 0.40% profit target (quick exits)
+            stop_loss_pct=0.75,  # 0.75% stop loss (accounts for slippage)
+            slippage_buffer_pct=0.10,  # 0.10% slippage buffer
         )
-        # Create scalping position manager
+        # Create scalping position manager (optimized for profit preservation)
         scalp_manager = ScalpingManager(
             client=client,
-            check_interval=1.0,  # Check every 1 second
-            max_hold_minutes=30,  # Max 30 min hold time
-            trailing_lock_pct=0.3,  # Lock 30% of gains
+            check_interval=0.5,  # Check every 0.5 seconds (faster reaction)
+            max_hold_minutes=5,  # Max 5 min hold time (true scalping)
+            trailing_lock_pct=0.50,  # Lock gains 0.5% below highs
+            min_profit_to_trail=0.50,  # Start trailing at 0.5% profit
             dry_run=dry_run,
         )
         scalp_manager.start_monitoring()

@@ -82,14 +82,15 @@ class FastPipeline:
         max_workers: int = 8,  # Parallel threads
         atr_multiplier_sl: float = 1.0,  # Tighter stop loss (1x ATR)
         atr_multiplier_tp: float = 1.5,  # Smaller profit target (1.5x ATR)
-        max_position_pct: float = 0.02,  # 2% max per position (smaller)
+        max_position_pct: float = 0.08,  # 8% max per position (allows meaningful trades)
         min_score: float = 0.1,  # Minimum score to trade
         skip_regime: bool = True,  # Skip regime for speed
         skip_correlation: bool = True,  # Skip correlation for speed
-        # Scalping-specific settings
+        # Scalping-specific settings (optimized for profit preservation)
         use_scalp_indicators: bool = True,  # Use VWAP/momentum indicators
-        profit_target_pct: float = 0.75,  # 0.75% profit target
-        stop_loss_pct: float = 0.50,  # 0.50% stop loss (wider for execution delay)
+        profit_target_pct: float = 0.40,  # 0.40% profit target (quick exits)
+        stop_loss_pct: float = 0.75,  # 0.75% stop loss (wider for execution delay)
+        slippage_buffer_pct: float = 0.10,  # 0.10% buffer for execution slippage
         vwap_entry_std: float = 1.5,  # Enter at 1.5 std from VWAP
         volume_spike_mult: float = 1.5,  # Volume must be 1.5x avg
     ):
@@ -105,6 +106,7 @@ class FastPipeline:
         self.use_scalp_indicators = use_scalp_indicators
         self.profit_target_pct = profit_target_pct
         self.stop_loss_pct = stop_loss_pct
+        self.slippage_buffer_pct = slippage_buffer_pct
         self.vwap_entry_std = vwap_entry_std
         self.volume_spike_mult = volume_spike_mult
 
@@ -150,9 +152,9 @@ class FastPipeline:
         """Lazy load position sizer with scalping settings."""
         if self._sizer is None:
             self._sizer = PositionSizer(
-                kelly_factor=0.25,  # Reduced Kelly for faster trades
+                kelly_factor=0.30,  # Slightly higher Kelly for scalping
                 max_position_pct=self.max_position_pct,
-                max_portfolio_heat=0.06,  # Lower heat for more positions
+                max_portfolio_heat=0.20,  # Allow more positions with larger sizing
                 atr_risk_mult=self.atr_multiplier_sl,
                 take_profit_ratio=self.atr_multiplier_tp / self.atr_multiplier_sl,
             )
@@ -218,7 +220,13 @@ class FastPipeline:
                 result.signal = scalp_signal.signal
                 result.score = scalp_signal.strength
                 result.stop_loss = scalp_signal.stop_loss
-                result.take_profit = scalp_signal.target_price
+                # Apply slippage buffer to take profit (reduce target slightly)
+                if scalp_signal.signal == "BUY":
+                    result.take_profit = scalp_signal.target_price * (1 - self.slippage_buffer_pct / 100)
+                elif scalp_signal.signal == "SELL":
+                    result.take_profit = scalp_signal.target_price * (1 + self.slippage_buffer_pct / 100)
+                else:
+                    result.take_profit = scalp_signal.target_price
 
                 if result.signal == "HOLD":
                     result.latency_ms = (datetime.now(timezone.utc) - start).total_seconds() * 1000
