@@ -737,6 +737,12 @@ class TradingPipeline:
             result.risk_approved = risk_step.passed
 
             if not risk_step.passed:
+                # Print verbose risk check details for debugging
+                checks = risk_result.get("checks", []) if risk_result else []
+                failed = [c for c in checks if not c.get("passed", True)]
+                print(f"  [DEBUG] {symbol} risk failed: {risk_step.detail}")
+                for c in failed:
+                    print(f"    - {c.get('rule')}: {c.get('detail')}")
                 result.error = f"Risk rejected: {risk_step.detail}"
                 result.steps.append(PipelineStep(name="execute", detail="skipped (risk rejected)"))
                 results.append(result)
