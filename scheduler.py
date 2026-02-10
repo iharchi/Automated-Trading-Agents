@@ -872,14 +872,14 @@ def main():
     parser.add_argument(
         "--scalp-interval",
         type=int,
-        default=1,
-        help="Minutes between scalp cycles (default: 1)",
+        default=30,
+        help="Seconds between scalp cycles (default: 30)",
     )
     parser.add_argument(
         "--scalp-workers",
         type=int,
-        default=8,
-        help="Parallel worker threads for scalping (default: 8)",
+        default=12,
+        help="Parallel worker threads for scalping (default: 12)",
     )
     # Pre-market scan mode
     parser.add_argument(
@@ -973,9 +973,11 @@ def main():
     print(f"  Scan Mode    : {scan_mode}")
     if args.scalp:
         print(f"  Scalp Workers: {args.scalp_workers} threads")
+        print(f"  Interval     : {interval} sec")
+    else:
+        print(f"  Interval     : {interval} min")
     if not args.finviz and not args.scan and not args.premarket:
         print(f"  Symbols      : {', '.join(symbols)}")
-    print(f"  Interval     : {interval} min")
     print(f"  Timeframe    : {args.timeframe}")
     if check_news:
         news_mode = "REQUIRED" if require_news else "ON"
@@ -1163,8 +1165,14 @@ def main():
                 break
             continue  # will wait_for_market_open on next iteration
 
-        logger.info("Sleeping %d minutes until next cycle...", interval)
-        sleep_seconds = interval * 60
+        # Scalp mode uses seconds, regular mode uses minutes
+        if args.scalp:
+            sleep_seconds = interval  # Already in seconds for scalping
+            logger.info("Sleeping %d seconds until next scalp cycle...", interval)
+        else:
+            sleep_seconds = interval * 60
+            logger.info("Sleeping %d minutes until next cycle...", interval)
+
         while sleep_seconds > 0 and not _shutdown:
             time.sleep(min(sleep_seconds, 10))
             sleep_seconds -= 10
