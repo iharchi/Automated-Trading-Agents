@@ -53,6 +53,7 @@ from utils.finviz_scanner import FinvizScanner
 from utils.news_analyzer import NewsAnalyzer
 from utils.fast_pipeline import FastPipeline, QueuedTrade
 from utils.scalping_manager import ScalpingManager, ScalpPosition
+from agents.pipeline_optimizer_agent import PipelineOptimizerAgent
 
 logger = logging.getLogger("scheduler")
 
@@ -894,6 +895,12 @@ def main():
         default=12,
         help="Parallel worker threads for scalping (default: 12)",
     )
+    parser.add_argument(
+        "--optimize-cycles",
+        type=int,
+        default=10,
+        help="Run pipeline optimizer every N cycles (default: 10, 0 to disable)",
+    )
     # Pre-market scan mode
     parser.add_argument(
         "--premarket",
@@ -1083,6 +1090,12 @@ def main():
         scalp_manager.start_monitoring()
         print("  Scalp Manager: Position monitoring active")
 
+    # Create pipeline optimizer for periodic analysis
+    optimizer = None
+    if args.optimize_cycles > 0:
+        optimizer = PipelineOptimizerAgent(client=client, lookback_days=30)
+        print(f"  Optimizer     : Active (every {args.optimize_cycles} cycles)")
+
     # ── Pre-market scan mode ─────────────────────────────────
     if args.premarket:
         # Get symbols to scan
@@ -1169,6 +1182,23 @@ def main():
             # Show scalp stats periodically
             if cycle % 10 == 0 and scalp_manager:
                 print(scalp_manager.format_stats())
+
+        # Run pipeline optimizer periodically
+        if optimizer and args.optimize_cycles > 0 and cycle % args.optimize_cycles == 0:
+            try:
+                logger.info("Running pipeline optimizer (cycle %d)...", cycle)
+                analysis = optimizer.analyze()
+                result = optimizer.execute(analysis=analysis)
+                print(PipelineOptimizerAgent.format_suggestions(result))
+
+                # Log high-priority suggestions
+                high_priority = [s for s in result.get("suggestions", []) if s.get("priority") == "high"]
+                if high_priority:
+                    logger.warning("OPTIMIZER: %d high-priority suggestions", len(high_priority))
+                    for s in high_priority:
+                        logger.warning("  [!] %s", s.get("title", ""))
+            except Exception as e:
+                logger.warning("Optimizer failed: %s", e)
 
         elif args.finviz:
             run_finviz_cycle(
