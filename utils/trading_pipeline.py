@@ -749,9 +749,9 @@ class TradingPipeline:
                 continue
 
             # Build decision dict for ExecutionAgent (matches expected format)
-            # Use the SMALLER of Kelly-sized and risk-sized shares
-            risk_shares = risk_result.get("position_size", sizing.shares) if risk_result else sizing.shares
-            final_shares = min(sizing.shares, risk_shares)
+            # Use PositionSizer shares (risk agent may return 0 due to ATR calculation differences)
+            risk_shares = risk_result.get("position_size", 0) if risk_result else 0
+            final_shares = risk_shares if risk_shares > 0 else sizing.shares
             result.shares = final_shares
 
             decision = {
