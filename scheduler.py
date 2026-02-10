@@ -50,6 +50,7 @@ from utils.signal_aggregator import SignalAggregator
 from utils.trading_pipeline import TradingPipeline
 from agents.scanner_agent import ScannerAgent, UNIVERSES
 from utils.finviz_scanner import FinvizScanner
+from utils.news_analyzer import NewsAnalyzer
 
 logger = logging.getLogger("scheduler")
 
@@ -242,8 +243,19 @@ def run_finviz_cycle(
     timeframe: str,
     cycle_number: int = 0,
     limit: int = 15,
+    check_news: bool = False,
+    require_news: bool = False,
 ) -> list:
     """Run one cycle using Finviz scanner to find opportunities.
+
+    Args:
+        pipeline: Trading pipeline to run
+        screen: Finviz screen to use
+        timeframe: Bar timeframe
+        cycle_number: Cycle counter
+        limit: Max stocks to scan
+        check_news: Whether to analyze news for each stock
+        require_news: Only trade stocks with recent news/catalyst
 
     Returns:
         List of PipelineResult objects.
@@ -251,6 +263,8 @@ def run_finviz_cycle(
     now = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
     print(f"\n--- Finviz Cycle #{cycle_number} start: {now} ---")
     print(f"    Screen: {screen}")
+    if check_news:
+        print(f"    News Check: ON (require: {require_news})")
 
     try:
         # Initialize Finviz scanner
@@ -273,12 +287,45 @@ def run_finviz_cycle(
         # Print Finviz scanner results
         print(FinvizScanner.format_results(stocks))
 
+        # Analyze news if requested
+        news_results = {}
+        if check_news:
+            print("\n  Analyzing news for candidates...")
+            news_analyzer = NewsAnalyzer()
+            news_results = news_analyzer.analyze_batch(symbols, days=2)
+            print(NewsAnalyzer.format_results(news_results))
+
+            # Filter to only stocks with news/catalysts if required
+            if require_news:
+                filtered_symbols = []
+                for symbol in symbols:
+                    analysis = news_results.get(symbol)
+                    if analysis and analysis.has_news:
+                        # Prefer stocks with catalysts or positive sentiment
+                        if analysis.has_catalyst or analysis.sentiment_score > 0:
+                            filtered_symbols.append(symbol)
+
+                if not filtered_symbols:
+                    print("  No stocks with news catalysts found.")
+                    return []
+
+                print(f"  Filtered to {len(filtered_symbols)} stocks with news: {', '.join(filtered_symbols)}")
+                symbols = filtered_symbols
+
         # Run pipeline on these symbols
         results = pipeline.run(symbols, timeframe=timeframe)
 
-        # Print per-symbol results
+        # Print per-symbol results with news info
         for r in results:
-            print(TradingPipeline.format_result(r))
+            result_str = TradingPipeline.format_result(r)
+            # Add news info if available
+            if r.symbol in news_results:
+                news = news_results[r.symbol]
+                if news.has_news:
+                    catalyst_str = f" [{news.catalyst_type}]" if news.has_catalyst else ""
+                    news_str = f"  NEWS: {news.sentiment} ({news.sentiment_score:+.2f}){catalyst_str}"
+                    result_str += f"\n{news_str}"
+            print(result_str)
 
         # Print summary table
         print(TradingPipeline.format_summary(results))
@@ -288,11 +335,13 @@ def run_finviz_cycle(
         sells = sum(1 for r in results if r.signal == "SELL")
         executed = sum(1 for r in results if r.executed)
         errors = sum(1 for r in results if r.error)
+        with_news = sum(1 for s in symbols if s in news_results and news_results[s].has_news)
 
         print(
             f"--- Finviz Cycle #{cycle_number} complete: "
             f"{buys} BUY / {sells} SELL / {executed} executed / "
-            f"{errors} errors ---\n"
+            f"{errors} errors"
+            + (f" / {with_news} with news ---\n" if check_news else " ---\n")
         )
 
         return results
@@ -624,6 +673,16 @@ def main():
         ],
         help="Finviz screen to use (default: OVERSOLD)",
     )
+    parser.add_argument(
+        "--check-news",
+        action="store_true",
+        help="Analyze news for each stock (identify catalysts)",
+    )
+    parser.add_argument(
+        "--require-news",
+        action="store_true",
+        help="Only trade stocks with recent news/catalyst (implies --check-news)",
+    )
     args = parser.parse_args()
 
     # Handle daemon management commands first
@@ -664,6 +723,10 @@ def main():
     close_eod = args.close_eod and not args.no_close_eod
     eod_minutes = args.eod_minutes
 
+    # Handle --require-news implying --check-news
+    check_news = args.check_news or args.require_news
+    require_news = args.require_news
+
     # Determine scan mode for banner
     if args.finviz:
         scan_mode = f"FINVIZ ({args.finviz_screen})"
@@ -681,6 +744,9 @@ def main():
         print(f"  Symbols      : {', '.join(symbols)}")
     print(f"  Interval     : {interval} min")
     print(f"  Timeframe    : {args.timeframe}")
+    if check_news:
+        news_mode = "REQUIRED" if require_news else "ON"
+        print(f"  News Check   : {news_mode}")
     print(f"  Close EOD    : {'ON' if close_eod else 'OFF'} ({eod_minutes} min before close)")
     print(f"  Regime       : {'ON' if Settings.PIPELINE_ENABLE_REGIME else 'OFF'}")
     print(f"  Correlation  : {'ON' if Settings.PIPELINE_ENABLE_CORRELATION else 'OFF'}")
@@ -722,7 +788,10 @@ def main():
     # ── Single-pass mode ─────────────────────────────────────
     if args.once:
         if args.finviz:
-            run_finviz_cycle(pipeline, args.finviz_screen, args.timeframe, cycle_number=1)
+            run_finviz_cycle(
+                pipeline, args.finviz_screen, args.timeframe,
+                cycle_number=1, check_news=check_news, require_news=require_news
+            )
         elif args.scan:
             run_scan_cycle(client, args.universe, dry_run, cycle_number=1)
         else:
@@ -743,7 +812,10 @@ def main():
         cycle += 1
 
         if args.finviz:
-            run_finviz_cycle(pipeline, args.finviz_screen, args.timeframe, cycle_number=cycle)
+            run_finviz_cycle(
+                pipeline, args.finviz_screen, args.timeframe,
+                cycle_number=cycle, check_news=check_news, require_news=require_news
+            )
         elif args.scan:
             run_scan_cycle(client, args.universe, dry_run, cycle_number=cycle)
         else:
