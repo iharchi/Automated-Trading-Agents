@@ -60,64 +60,56 @@ class FinvizStock:
     screen_source: str = ""  # Which screen found this stock
 
 
-# Finviz filter presets
+# Finviz filter presets (using valid finvizfinance filter names)
 SCREENS = {
     "TOP_GAINERS": {
-        "signal": "ta_topgainers",
-        "order": "-change",
+        "Change": "Up 5%",
+        "Relative Volume": "Over 2",
     },
     "TOP_LOSERS": {
-        "signal": "ta_toplosers",
-        "order": "change",
+        "Change": "Down 5%",
+        "Relative Volume": "Over 2",
     },
     "UNUSUAL_VOLUME": {
-        "sh_relvol": "o2",  # Relative volume > 2
-        "order": "-volume",
+        "Relative Volume": "Over 3",
+        "Average Volume": "Over 500K",
     },
     "NEW_HIGH": {
-        "signal": "ta_newhigh",
-        "order": "-change",
+        "52-Week High/Low": "New High",
     },
     "NEW_LOW": {
-        "signal": "ta_newlow",
-        "order": "change",
+        "52-Week High/Low": "New Low",
     },
     "OVERSOLD": {
-        "ta_rsi_os": True,  # RSI oversold
-        "order": "rsi",
+        "RSI (14)": "Oversold (30)",
     },
     "OVERBOUGHT": {
-        "ta_rsi_ob": True,  # RSI overbought
-        "order": "-rsi",
+        "RSI (14)": "Overbought (70)",
     },
     "BREAKOUT": {
-        "signal": "ta_unusualvolume",
-        "ta_highlow20d": "nh",  # New 20-day high
-        "order": "-change",
+        "20-Day High/Low": "New High",
+        "Relative Volume": "Over 1.5",
+        "Change": "Up",
     },
     "SMA_CROSS_UP": {
-        "ta_sma20_cross": "cross20above",
-        "order": "-change",
+        "20-Day Simple Moving Average": "Price crossed SMA20 above",
     },
     "SMA_CROSS_DOWN": {
-        "ta_sma20_cross": "cross20below",
-        "order": "change",
+        "20-Day Simple Moving Average": "Price crossed SMA20 below",
     },
     "GOLDEN_CROSS": {
-        "ta_sma50_cross": "cross50above",
-        "order": "-change",
+        "50-Day Simple Moving Average": "Price crossed SMA50 above",
     },
     "DEATH_CROSS": {
-        "ta_sma50_cross": "cross50below",
-        "order": "change",
+        "50-Day Simple Moving Average": "Price crossed SMA50 below",
     },
     "UPGRADES": {
-        "signal": "upgrade",
-        "order": "-change",
+        "Analyst Recom.": "Strong Buy (1)",
+        "Change": "Up",
     },
     "DOWNGRADES": {
-        "signal": "downgrade",
-        "order": "change",
+        "Analyst Recom.": "Sell",
+        "Change": "Down",
     },
 }
 
@@ -189,16 +181,15 @@ class FinvizScanner:
 
             # Build filters based on screen
             filters = SCREENS[screen_name].copy()
-            order = filters.pop("order", "-change")
 
             # Add price filters
-            filters["sh_price"] = f"u{int(self.max_price)}"  # Under max price
+            filters["Price"] = f"Over $5"
 
             # Set filters
             foverview.set_filter(filters_dict=filters)
 
             # Get data
-            df = foverview.screener_view(order=order, limit=limit)
+            df = foverview.screener_view(limit=limit)
 
             if df is None or df.empty:
                 logger.debug("No results for screen: %s", screen_name)
