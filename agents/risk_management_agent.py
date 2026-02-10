@@ -429,7 +429,8 @@ class RiskManagementAgent(BaseAgent):
                 self._check_position_for_sell(symbol, snapshot["positions"])
             )
 
-        approved = all(c.passed for c in checks) and shares > 0
+        # Approve if all checks pass (share count from PositionSizer is used instead)
+        approved = all(c.passed for c in checks)
 
         # Get sector info
         sector = self.get_sector(symbol)
