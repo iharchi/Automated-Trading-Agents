@@ -43,11 +43,11 @@ RISK_PER_TRADE_PCT = 0.03      # Risk at most 3% of equity per trade (optimized)
 ATR_STOP_MULTIPLIER = 1.75     # Stop-loss = entry - (ATR * 1.75) (wider stops)
 TAKE_PROFIT_RATIO = 2.5        # Take-profit at 2.5:1 reward-to-risk (optimized)
 
-# Limits for smarter risk management (optimized for profitability)
-DAILY_LOSS_LIMIT_PCT = 0.04    # Stop trading after 4% daily loss
-MAX_DRAWDOWN_PCT = 0.12        # Stop trading after 12% drawdown from peak
-MAX_SECTOR_CONCENTRATION = 0.40  # Max 40% in any single sector (more concentration)
-MAX_CORRELATED_POSITIONS = 3   # Max positions in highly correlated assets
+# Limits for smarter risk management (relaxed for paper trading)
+DAILY_LOSS_LIMIT_PCT = 0.10    # Stop trading after 10% daily loss (relaxed for paper)
+MAX_DRAWDOWN_PCT = 0.25        # Stop trading after 25% drawdown from peak (relaxed)
+MAX_SECTOR_CONCENTRATION = 0.60  # Max 60% in any single sector (more flexibility)
+MAX_CORRELATED_POSITIONS = 5   # Max positions in highly correlated assets
 
 # Sector mappings (simplified - full version in portfolio_guardian_agent.py)
 SECTOR_MAP = {
