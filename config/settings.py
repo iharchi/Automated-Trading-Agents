@@ -225,6 +225,16 @@ class Settings:
     PERF_RISK_FREE_RATE: float = float(_y("performance_analytics", "risk_free_rate", 0.05))
     PERF_TRADING_DAYS_YEAR: int = int(_y("performance_analytics", "trading_days_year", 252))
 
+    # ── Pipeline Optimizer ─────────────────────────────────────
+    OPT_LOOKBACK_DAYS: int = int(_y("optimizer", "lookback_days", 30))
+    OPT_MONITOR_INTERVAL: int = int(_y("optimizer", "monitor_interval", 300))
+    OPT_MIN_TRADES: int = int(_y("optimizer", "min_trades_for_analysis", 5))
+    OPT_LOW_WIN_RATE: float = float(_y("optimizer", "low_win_rate_threshold", 0.40))
+    OPT_HIGH_WIN_RATE: float = float(_y("optimizer", "high_win_rate_threshold", 0.65))
+    OPT_LOW_PROFIT_FACTOR: float = float(_y("optimizer", "low_profit_factor", 1.0))
+    OPT_HIGH_DRAWDOWN: float = float(_y("optimizer", "high_drawdown_threshold", 0.10))
+    OPT_MAX_CONSEC_LOSSES: int = int(_y("optimizer", "max_consecutive_losses", 5))
+
     # ── Walk-Forward Optimization ─────────────────────────────
     WFO_IS_RATIO: float = float(_y("walk_forward", "is_ratio", 0.70))
     WFO_NUM_WINDOWS: int = int(_y("walk_forward", "num_windows", 5))

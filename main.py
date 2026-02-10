@@ -27,6 +27,10 @@ Usage:
     python main.py --list-sectors          # List available sector groups
     python main.py --regime                # Detect market regime for symbols (default SPY)
     python main.py --regime AAPL TSLA      # Detect regime for specific symbols
+    python main.py --optimize              # Run pipeline optimizer for suggestions
+    python main.py --optimize --lookback-days 60   # Analyze last 60 days
+    python main.py --optimize-monitor      # Continuous optimizer monitoring
+    python main.py --optimize-monitor --optimize-interval 600  # Check every 10 min
 """
 
 import argparse
@@ -50,6 +54,7 @@ from utils.signal_aggregator import SignalAggregator
 from utils.position_sizer import PositionSizer
 from utils.event_bus import EventBus
 from utils.trading_pipeline import TradingPipeline
+from agents.pipeline_optimizer_agent import PipelineOptimizerAgent
 
 # Individual agents for standalone mode
 STANDALONE_AGENTS = {
@@ -360,6 +365,28 @@ def main():
              "Aggregator → Correlation → Kelly Sizer → Risk → Execute → "
              "Trailing Stops).  Combine with --auto-trade or --dry-run.",
     )
+    parser.add_argument(
+        "--optimize",
+        action="store_true",
+        help="Run pipeline optimizer to analyze performance and get suggestions",
+    )
+    parser.add_argument(
+        "--optimize-monitor",
+        action="store_true",
+        help="Run pipeline optimizer in continuous monitoring mode",
+    )
+    parser.add_argument(
+        "--optimize-interval",
+        type=int,
+        default=300,
+        help="Interval in seconds for optimizer monitoring (default: 300)",
+    )
+    parser.add_argument(
+        "--lookback-days",
+        type=int,
+        default=30,
+        help="Lookback period in days for optimizer analysis (default: 30)",
+    )
     args = parser.parse_args()
 
     setup_logging()
@@ -447,6 +474,44 @@ def main():
         if bus and args.events:
             history = bus.get_history(limit=50)
             print(EventBus.format_history(history))
+
+        return
+
+    # ── Pipeline Optimizer mode ───────────────────────────────
+    if args.optimize or args.optimize_monitor:
+        from utils.alpaca_client import AlpacaClient
+
+        client = AlpacaClient()
+        optimizer = PipelineOptimizerAgent(
+            client=client,
+            lookback_days=args.lookback_days,
+        )
+
+        if args.optimize_monitor:
+            print(f"\n{'=' * 66}")
+            print(f"  PIPELINE OPTIMIZER - CONTINUOUS MONITORING")
+            print(f"{'=' * 66}")
+            print(f"  Lookback     : {args.lookback_days} days")
+            print(f"  Interval     : {args.optimize_interval} seconds")
+            print(f"  Press Ctrl+C to stop")
+            print(f"{'=' * 66}\n")
+
+            optimizer.monitor(
+                interval=args.optimize_interval,
+                max_iterations=None,
+            )
+        else:
+            print(f"\n{'=' * 66}")
+            print(f"  PIPELINE OPTIMIZER - ONE-TIME ANALYSIS")
+            print(f"{'=' * 66}")
+            print(f"  Lookback     : {args.lookback_days} days")
+            print(f"{'=' * 66}\n")
+
+            analysis = optimizer.analyze()
+            print(PipelineOptimizerAgent.format_analysis(analysis))
+
+            result = optimizer.execute(analysis=analysis)
+            print(PipelineOptimizerAgent.format_suggestions(result))
 
         return
 
