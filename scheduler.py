@@ -49,6 +49,7 @@ from utils.preflight import PreflightCheck
 from utils.signal_aggregator import SignalAggregator
 from utils.trading_pipeline import TradingPipeline
 from agents.scanner_agent import ScannerAgent, UNIVERSES
+from utils.finviz_scanner import FinvizScanner
 
 logger = logging.getLogger("scheduler")
 
@@ -233,6 +234,77 @@ def run_scan_cycle(
         logger.error("Scan cycle %d failed: %s", cycle_number, e)
         print(f"--- Scan Cycle #{cycle_number} FAILED: {e} ---\n")
         return {}
+
+
+def run_finviz_cycle(
+    pipeline: TradingPipeline,
+    screen: str,
+    timeframe: str,
+    cycle_number: int = 0,
+    limit: int = 15,
+) -> list:
+    """Run one cycle using Finviz scanner to find opportunities.
+
+    Returns:
+        List of PipelineResult objects.
+    """
+    now = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
+    print(f"\n--- Finviz Cycle #{cycle_number} start: {now} ---")
+    print(f"    Screen: {screen}")
+
+    try:
+        # Initialize Finviz scanner
+        finviz = FinvizScanner(min_price=5.0, max_price=500.0)
+
+        # Get stocks from Finviz
+        if screen == "BUY_CANDIDATES":
+            stocks = finviz.get_buy_candidates(limit=limit)
+        else:
+            stocks = finviz.get_screen(screen, limit=limit)
+
+        if not stocks:
+            print(f"  No stocks found from Finviz {screen} screen")
+            return []
+
+        # Extract symbols
+        symbols = [s.symbol for s in stocks]
+        print(f"  Finviz found: {', '.join(symbols)}")
+
+        # Print Finviz scanner results
+        print(FinvizScanner.format_results(stocks))
+
+        # Run pipeline on these symbols
+        results = pipeline.run(symbols, timeframe=timeframe)
+
+        # Print per-symbol results
+        for r in results:
+            print(TradingPipeline.format_result(r))
+
+        # Print summary table
+        print(TradingPipeline.format_summary(results))
+
+        # Stats
+        buys = sum(1 for r in results if r.signal == "BUY")
+        sells = sum(1 for r in results if r.signal == "SELL")
+        executed = sum(1 for r in results if r.executed)
+        errors = sum(1 for r in results if r.error)
+
+        print(
+            f"--- Finviz Cycle #{cycle_number} complete: "
+            f"{buys} BUY / {sells} SELL / {executed} executed / "
+            f"{errors} errors ---\n"
+        )
+
+        return results
+
+    except ImportError as e:
+        logger.error("Finviz not available: %s", e)
+        print("  ERROR: finvizfinance not installed. Run: pip install finvizfinance")
+        return []
+    except Exception as e:
+        logger.error("Finviz cycle %d failed: %s", cycle_number, e)
+        print(f"--- Finviz Cycle #{cycle_number} FAILED: {e} ---\n")
+        return []
 
 
 # ── Market hours wait ────────────────────────────────────────────
@@ -537,6 +609,21 @@ def main():
         default=15,
         help="Minutes before market close to close all positions (default: 15)",
     )
+    parser.add_argument(
+        "--finviz",
+        action="store_true",
+        help="Use Finviz screener to find trading opportunities",
+    )
+    parser.add_argument(
+        "--finviz-screen",
+        default="OVERSOLD",
+        choices=[
+            "TOP_GAINERS", "TOP_LOSERS", "UNUSUAL_VOLUME", "NEW_HIGH", "NEW_LOW",
+            "OVERSOLD", "OVERBOUGHT", "BREAKOUT", "SMA_CROSS_UP", "SMA_CROSS_DOWN",
+            "GOLDEN_CROSS", "DEATH_CROSS", "UPGRADES", "DOWNGRADES", "BUY_CANDIDATES"
+        ],
+        help="Finviz screen to use (default: OVERSOLD)",
+    )
     args = parser.parse_args()
 
     # Handle daemon management commands first
@@ -577,11 +664,21 @@ def main():
     close_eod = args.close_eod and not args.no_close_eod
     eod_minutes = args.eod_minutes
 
+    # Determine scan mode for banner
+    if args.finviz:
+        scan_mode = f"FINVIZ ({args.finviz_screen})"
+    elif args.scan:
+        scan_mode = f"SCANNER ({args.universe})"
+    else:
+        scan_mode = "FIXED SYMBOLS"
+
     print(f"\n{'=' * 62}")
     print(f"  AUTOMATED TRADING SCHEDULER")
     print(f"{'=' * 62}")
     print(f"  Mode         : {mode}")
-    print(f"  Symbols      : {', '.join(symbols)}")
+    print(f"  Scan Mode    : {scan_mode}")
+    if not args.finviz and not args.scan:
+        print(f"  Symbols      : {', '.join(symbols)}")
     print(f"  Interval     : {interval} min")
     print(f"  Timeframe    : {args.timeframe}")
     print(f"  Close EOD    : {'ON' if close_eod else 'OFF'} ({eod_minutes} min before close)")
@@ -624,7 +721,9 @@ def main():
 
     # ── Single-pass mode ─────────────────────────────────────
     if args.once:
-        if args.scan:
+        if args.finviz:
+            run_finviz_cycle(pipeline, args.finviz_screen, args.timeframe, cycle_number=1)
+        elif args.scan:
             run_scan_cycle(client, args.universe, dry_run, cycle_number=1)
         else:
             results = run_cycle(pipeline, symbols, args.timeframe, cycle_number=1)
@@ -643,7 +742,9 @@ def main():
 
         cycle += 1
 
-        if args.scan:
+        if args.finviz:
+            run_finviz_cycle(pipeline, args.finviz_screen, args.timeframe, cycle_number=cycle)
+        elif args.scan:
             run_scan_cycle(client, args.universe, dry_run, cycle_number=cycle)
         else:
             results = run_cycle(pipeline, symbols, args.timeframe, cycle_number=cycle)
