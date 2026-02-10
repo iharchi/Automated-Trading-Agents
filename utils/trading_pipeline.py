@@ -449,15 +449,6 @@ class TradingPipeline:
             exec_result = self.exec_agent.execute(symbol, exec_analysis)
             status = exec_result.get("status", "skipped")
 
-            # Debug: show execution status and any errors
-            if status in ("skipped", "failed"):
-                error = exec_result.get("error", "")
-                checks = exec_result.get("checks", [])
-                failed_checks = [c for c in checks if not c.get("passed", True)]
-                print(f"  [DEBUG] {symbol} execution {status}: {error}")
-                for c in failed_checks:
-                    print(f"    - {c.get('rule')}: {c.get('detail')}")
-
             if status in ("filled", "dry_run", "pending", "submitted"):
                 self._emit(
                     "position_opened",
@@ -478,7 +469,6 @@ class TradingPipeline:
             ), exec_result
         except Exception as e:
             logger.error("Execution failed for %s: %s", symbol, e)
-            print(f"  [DEBUG] {symbol} execution EXCEPTION: {e}")
             return PipelineStep(name="execute", passed=False, detail=str(e)), None
 
     def _step_trailing_stop(
@@ -757,9 +747,6 @@ class TradingPipeline:
                 "combined_score": agg.combined_score,
                 "confidence": agg.confidence,
             }
-
-            # Debug: Show we're about to execute
-            print(f"  >>> EXECUTING: {symbol} {agg.signal} {final_shares} shares @ ${price:.2f}")
 
             # Journal the decision
             if self.journal and self.enable_journal:
