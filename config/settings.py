@@ -76,17 +76,17 @@ class Settings:
     SENT_BEARISH_THRESHOLD: float = float(_y("sentiment_analysis", "bearish_threshold", -0.15))
 
     # ── Risk Management ──────────────────────────────────────
-    RISK_MAX_POSITION_PCT: float = float(_y("risk_management", "max_position_pct", 0.10))
-    RISK_MAX_EXPOSURE: float = float(_y("risk_management", "max_portfolio_exposure", 0.90))
-    RISK_PER_TRADE_PCT: float = float(_y("risk_management", "risk_per_trade_pct", 0.02))
+    RISK_MAX_POSITION_PCT: float = float(_y("risk_management", "max_position_pct", 0.15))
+    RISK_MAX_EXPOSURE: float = float(_y("risk_management", "max_portfolio_exposure", 0.95))
+    RISK_PER_TRADE_PCT: float = float(_y("risk_management", "risk_per_trade_pct", 0.03))
     RISK_ATR_STOP_MULT: float = float(_y("risk_management", "atr_stop_multiplier", 1.5))
     RISK_TP_RATIO: float = float(_y("risk_management", "take_profit_ratio", 2.0))
 
     # ── Portfolio Manager ────────────────────────────────────
     PM_TA_WEIGHT: float = float(_y("portfolio_manager", "ta_weight", 0.65))
     PM_SENTIMENT_WEIGHT: float = float(_y("portfolio_manager", "sentiment_weight", 0.35))
-    PM_BUY_THRESHOLD: float = float(_y("portfolio_manager", "buy_threshold", 0.25))
-    PM_SELL_THRESHOLD: float = float(_y("portfolio_manager", "sell_threshold", -0.25))
+    PM_BUY_THRESHOLD: float = float(_y("portfolio_manager", "buy_threshold", 0.15))
+    PM_SELL_THRESHOLD: float = float(_y("portfolio_manager", "sell_threshold", -0.15))
 
     # ── Scheduler ────────────────────────────────────────────
     SCHED_INTERVAL: int = int(_y("trading", "interval", _y("scheduler", "interval_minutes", 1)))
@@ -105,7 +105,7 @@ class Settings:
     SCAN_DEFAULT_SOURCE: str = _y("scanner", "default_source", "SP500_TOP50")
     SCAN_TOP_N: int = int(_y("scanner", "top_n", 10))
     SCAN_SIGNAL_FILTER: str = _y("scanner", "signal_filter", "all")
-    SCAN_MIN_SCORE: int = int(_y("scanner", "min_score", 2))
+    SCAN_MIN_SCORE: int = int(_y("scanner", "min_score", 1))
     SCAN_RATE_LIMIT: float = float(_y("scanner", "rate_limit_delay", 0.1))
 
     # ── Trailing Stops ──────────────────────────────────────
@@ -135,8 +135,8 @@ class Settings:
 
     # ── Position Sizer (Kelly) ────────────────────────────
     SIZER_KELLY_FACTOR: float = float(_y("position_sizer", "kelly_factor", 0.5))
-    SIZER_MAX_POSITION_PCT: float = float(_y("position_sizer", "max_position_pct", 0.10))
-    SIZER_MAX_PORTFOLIO_HEAT: float = float(_y("position_sizer", "max_portfolio_heat", 0.06))
+    SIZER_MAX_POSITION_PCT: float = float(_y("position_sizer", "max_position_pct", 0.15))
+    SIZER_MAX_PORTFOLIO_HEAT: float = float(_y("position_sizer", "max_portfolio_heat", 0.12))
     SIZER_ATR_RISK_MULT: float = float(_y("position_sizer", "atr_risk_multiplier", 1.5))
     SIZER_TP_RATIO: float = float(_y("position_sizer", "take_profit_ratio", 2.0))
     SIZER_DEFAULT_WIN_RATE: float = float(_y("position_sizer", "default_win_rate", 0.50))
@@ -148,8 +148,8 @@ class Settings:
     AGG_SENTIMENT_WEIGHT: float = float(_y("aggregator", "sentiment_weight", 0.20))
     AGG_MTF_WEIGHT: float = float(_y("aggregator", "mtf_weight", 0.30))
     AGG_REGIME_WEIGHT: float = float(_y("aggregator", "regime_weight", 0.10))
-    AGG_BUY_THRESHOLD: float = float(_y("aggregator", "buy_threshold", 0.25))
-    AGG_SELL_THRESHOLD: float = float(_y("aggregator", "sell_threshold", -0.25))
+    AGG_BUY_THRESHOLD: float = float(_y("aggregator", "buy_threshold", 0.10))
+    AGG_SELL_THRESHOLD: float = float(_y("aggregator", "sell_threshold", -0.10))
     AGG_MIN_SOURCES: int = int(_y("aggregator", "min_sources", 1))
     AGG_REGIME_ADAPTIVE: bool = _y("aggregator", "regime_adaptive", True)
     AGG_AGREEMENT_BONUS: float = float(_y("aggregator", "agreement_bonus", 0.10))
@@ -175,7 +175,7 @@ class Settings:
         ["signal", "order_placed", "order_filled", "order_failed"],
     )
     NOTIFY_MIN_SIGNAL_SCORE: float = float(
-        _y("notifications", "min_signal_score", 0.25)
+        _y("notifications", "min_signal_score", 0.10)
     )
 
     # Email
