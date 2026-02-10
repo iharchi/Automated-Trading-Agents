@@ -282,10 +282,9 @@ class ScalpingManager:
 
                 for symbol in symbols:
                     try:
-                        # Get latest price
-                        bars = self.client.get_bars(symbol, timeframe="1Min", limit=1)
-                        if not bars.empty:
-                            current_price = float(bars["close"].iloc[-1])
+                        # Get REAL-TIME price using quotes (not delayed bars!)
+                        current_price = self._get_realtime_price(symbol)
+                        if current_price and current_price > 0:
                             self.update_price(symbol, current_price)
                     except Exception as e:
                         logger.debug("Price update failed for %s: %s", symbol, e)
@@ -294,6 +293,38 @@ class ScalpingManager:
                 logger.error("Monitor loop error: %s", e)
 
             self._stop_monitoring.wait(self.check_interval)
+
+    def _get_realtime_price(self, symbol: str) -> float | None:
+        """Get real-time price using quotes/trades (not delayed bars)."""
+        try:
+            # Try quote first (bid/ask midpoint is most accurate)
+            quote = self.client.api.get_latest_quote(symbol)
+            bid = float(quote.bp) if quote.bp else 0
+            ask = float(quote.ap) if quote.ap else 0
+
+            if bid > 0 and ask > 0:
+                return (bid + ask) / 2
+            elif ask > 0:
+                return ask
+            elif bid > 0:
+                return bid
+
+            # Fallback to last trade price
+            trade = self.client.api.get_latest_trade(symbol)
+            if trade:
+                return float(trade.p)
+
+            return None
+        except Exception as e:
+            logger.debug("Real-time price failed for %s: %s", symbol, e)
+            # Last resort: use 1-min bar (delayed but better than nothing)
+            try:
+                bars = self.client.get_bars(symbol, timeframe="1Min", limit=1)
+                if not bars.empty:
+                    return float(bars["close"].iloc[-1])
+            except Exception:
+                pass
+            return None
 
     # ── Manual Exit ──────────────────────────────────────────────
 

@@ -88,8 +88,8 @@ class FastPipeline:
         skip_correlation: bool = True,  # Skip correlation for speed
         # Scalping-specific settings
         use_scalp_indicators: bool = True,  # Use VWAP/momentum indicators
-        profit_target_pct: float = 0.5,  # 0.5% profit target
-        stop_loss_pct: float = 0.25,  # 0.25% stop loss
+        profit_target_pct: float = 0.75,  # 0.75% profit target
+        stop_loss_pct: float = 0.50,  # 0.50% stop loss (wider for execution delay)
         vwap_entry_std: float = 1.5,  # Enter at 1.5 std from VWAP
         volume_spike_mult: float = 1.5,  # Volume must be 1.5x avg
     ):

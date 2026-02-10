@@ -1067,8 +1067,8 @@ def main():
             min_score=0.1,
             # Scalping-specific
             use_scalp_indicators=True,
-            profit_target_pct=0.5,  # 0.5% profit target
-            stop_loss_pct=0.25,  # 0.25% stop loss
+            profit_target_pct=0.75,  # 0.75% profit target
+            stop_loss_pct=0.50,  # 0.50% stop loss (wider for execution delays)
         )
         # Create scalping position manager
         scalp_manager = ScalpingManager(

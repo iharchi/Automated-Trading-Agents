@@ -55,8 +55,8 @@ class ScalpingIndicators:
         volume_spike_mult: float = 2.0,   # Volume must be 2x average
         min_spread_pct: float = 0.05,     # Minimum spread to trade
         max_spread_pct: float = 0.50,     # Maximum spread (avoid illiquid)
-        profit_target_pct: float = 0.5,   # 0.5% profit target
-        stop_loss_pct: float = 0.25,      # 0.25% stop loss (2:1 R:R)
+        profit_target_pct: float = 0.75,  # 0.75% profit target
+        stop_loss_pct: float = 0.50,      # 0.50% stop loss (1.5:1 R:R, wider for execution)
     ):
         self.vwap_std_entry = vwap_std_entry
         self.vwap_std_exit = vwap_std_exit
