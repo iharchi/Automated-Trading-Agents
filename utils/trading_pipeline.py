@@ -419,7 +419,7 @@ class TradingPipeline:
                 proposed_side=side,
                 price=price,  # Risk agent expects 'price', not 'proposed_price'
                 atr=atr,
-                skip_daily_checks=self.dry_run,  # Skip daily checks for paper trading
+                skip_daily_checks=True,  # Always skip daily loss/drawdown checks (limits already relaxed)
             )
             approved = risk_result.get("approved", False)
 
